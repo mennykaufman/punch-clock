@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#171923" />
+<title>Punch Clock</title>
+<link rel="manifest" href="manifest.json" />
+<link rel="icon" href="icons/icon-192.png" />
+<link rel="apple-touch-icon" href="icons/icon-192.png" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<header class="topbar">
+  <h1 id="topbar-title">Home</h1>
+</header>
+
+<main id="app">
+
+  <!-- HOME -->
+  <section class="screen" id="screen-home" data-screen>
+    <div class="card status-card">
+      <p class="status-label" id="status-label">Not clocked in</p>
+      <p class="status-sub" id="status-sub"></p>
+      <button class="big-button" id="btn-clock" type="button">Clock In</button>
+    </div>
+
+    <div class="card">
+      <p class="card-title">Cafeteria points this month</p>
+      <p class="points-balance" id="home-points-balance">0</p>
+      <p class="points-sub" id="home-points-sub"></p>
+    </div>
+  </section>
+
+  <!-- HISTORY -->
+  <section class="screen" id="screen-history" data-screen hidden>
+    <div class="card totals-card">
+      <div class="totals-row">
+        <div>
+          <p class="totals-label">This week</p>
+          <p class="totals-value" id="week-hours">0h</p>
+          <p class="totals-sub" id="week-pay">₪0</p>
+        </div>
+        <div>
+          <p class="totals-label">This month</p>
+          <p class="totals-value" id="month-hours">0h</p>
+          <p class="totals-sub" id="month-pay">₪0</p>
+        </div>
+      </div>
+    </div>
+    <ul class="list" id="history-list"></ul>
+  </section>
+
+  <!-- CAFETERIA -->
+  <section class="screen" id="screen-cafeteria" data-screen hidden>
+    <div class="card">
+      <p class="card-title">Balance this month</p>
+      <p class="points-balance" id="cafeteria-balance">0</p>
+      <p class="points-sub" id="cafeteria-balance-sub"></p>
+    </div>
+    <button class="secondary-button" id="btn-log-points" type="button">Log points used</button>
+    <ul class="list" id="cafeteria-list"></ul>
+  </section>
+
+  <!-- SETTINGS -->
+  <section class="screen" id="screen-settings" data-screen hidden>
+    <div class="card">
+      <label class="field-label" for="employment-start-date">Employment start date</label>
+      <input class="field-input" type="date" id="employment-start-date" />
+      <p class="field-hint" id="bonus-eligibility-hint"></p>
+    </div>
+    <div class="card">
+      <label class="switch-row">
+        <span>Remind me to log cafeteria points on clock-out</span>
+        <input type="checkbox" id="remind-points-toggle" />
+      </label>
+    </div>
+  </section>
+
+</main>
+
+<nav class="bottom-nav">
+  <button class="nav-btn active" data-nav="home" type="button">
+    <span class="nav-icon">🏠</span><span>Home</span>
+  </button>
+  <button class="nav-btn" data-nav="history" type="button">
+    <span class="nav-icon">📋</span><span>History</span>
+  </button>
+  <button class="nav-btn" data-nav="cafeteria" type="button">
+    <span class="nav-icon">🍽️</span><span>Cafeteria</span>
+  </button>
+  <button class="nav-btn" data-nav="settings" type="button">
+    <span class="nav-icon">⚙️</span><span>Settings</span>
+  </button>
+</nav>
+
+<!-- Shift disambiguation / confirmation modal -->
+<div class="modal-backdrop" id="modal-backdrop" hidden>
+  <div class="modal" id="modal">
+    <h2 id="modal-title">Title</h2>
+    <div id="modal-body"></div>
+    <div class="modal-actions" id="modal-actions"></div>
+  </div>
+</div>
+
+<script type="module" src="app.js"></script>
+<script>
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", () => {
+      navigator.serviceWorker.register("service-worker.js").catch(() => {});
+    });
+  }
+</script>
+</body>
+</html>
