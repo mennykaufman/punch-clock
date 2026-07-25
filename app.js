@@ -1,32 +1,170 @@
 import { SHIFT_CATALOG, matchShiftByClockIn } from "./data/shifts.js";
 import { calculatePay, isProductivityBonusEligible } from "./data/payRules.js";
+import { fetchUserData, saveUserData, subscribeToUserData } from "./data/cloud.js";
 
-const STORAGE_KEY = "punchclock_state_v1";
+const SESSION_KEY = "punchclock_session_v1"; // { employeeId, pin }
 
-function loadState() {
-  const raw = localStorage.getItem(STORAGE_KEY);
-  if (!raw) {
-    return {
-      settings: {
-        employmentStartDate: "",
-        remindPointsOnClockOut: true,
-      },
-      currentPunch: null, // { clockInISO, shift: {start,end,vouchers,points} }
-      punches: [], // completed punches
-      cafeteriaSpending: [], // { id, timestampISO, pointsSpent, note }
-    };
-  }
-  return JSON.parse(raw);
+function defaultState(pin) {
+  return {
+    pin,
+    settings: {
+      employmentStartDate: "",
+      remindPointsOnClockOut: true,
+    },
+    currentPunch: null, // { clockInISO, shift: {start,end,vouchers,points} }
+    punches: [], // completed punches
+    cafeteriaSpending: [], // { id, timestampISO, pointsSpent, note }
+  };
 }
+
+function localCacheKey(employeeId) {
+  return `punchclock_state_${employeeId}`;
+}
+
+function loadLocalCache(employeeId) {
+  const raw = localStorage.getItem(localCacheKey(employeeId));
+  return raw ? JSON.parse(raw) : null;
+}
+
+function saveLocalCache(employeeId, data) {
+  localStorage.setItem(localCacheKey(employeeId), JSON.stringify(data));
+}
+
+function getSession() {
+  const raw = localStorage.getItem(SESSION_KEY);
+  return raw ? JSON.parse(raw) : null;
+}
+
+function setSession(session) {
+  localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+}
+
+function clearSession() {
+  localStorage.removeItem(SESSION_KEY);
+}
+
+let session = null; // { employeeId, pin }
+let state = null;
+let unsubscribeCloud = null;
+let applyingRemoteUpdate = false;
 
 function saveState() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  if (!session) return;
+  saveLocalCache(session.employeeId, state);
+  if (!applyingRemoteUpdate) {
+    saveUserData(session.employeeId, state).catch((err) => {
+      console.error("cloud save failed:", err);
+      // Offline: Firestore's own local cache queues this write and retries
+      // automatically once the connection comes back, so nothing else to do here.
+    });
+  }
 }
-
-let state = loadState();
 
 function uid() {
   return (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`);
+}
+
+// ---------- auth / session ----------
+
+const loginScreen = document.getElementById("login-screen");
+const appShell = document.getElementById("app-shell");
+const loginEmployeeId = document.getElementById("login-employee-id");
+const loginPin = document.getElementById("login-pin");
+const loginError = document.getElementById("login-error");
+const btnLogin = document.getElementById("btn-login");
+
+function showLoginScreen() {
+  loginScreen.hidden = false;
+  appShell.hidden = true;
+}
+
+function showAppShell() {
+  loginScreen.hidden = true;
+  appShell.hidden = false;
+}
+
+// Subscribes to this employee's cloud document so changes made on any other
+// device show up here automatically too.
+function startCloudSync(employeeId) {
+  if (unsubscribeCloud) unsubscribeCloud();
+  unsubscribeCloud = subscribeToUserData(employeeId, (data) => {
+    applyingRemoteUpdate = true;
+    state = data;
+    saveLocalCache(employeeId, state);
+    renderHome();
+    renderHistory();
+    renderCafeteria();
+    renderSettings();
+    applyingRemoteUpdate = false;
+  });
+}
+
+async function handleLogin() {
+  const employeeId = loginEmployeeId.value.trim();
+  const pin = loginPin.value.trim();
+  loginError.textContent = "";
+
+  if (!employeeId || !pin) {
+    loginError.textContent = "Enter both your Work ID and PIN.";
+    return;
+  }
+
+  btnLogin.disabled = true;
+  btnLogin.textContent = "Checking…";
+  try {
+    const existing = await fetchUserData(employeeId);
+
+    if (existing) {
+      if (existing.pin !== pin) {
+        loginError.textContent = "Wrong PIN for this Work ID.";
+        return;
+      }
+      state = existing;
+    } else {
+      state = defaultState(pin);
+      await saveUserData(employeeId, state);
+    }
+
+    session = { employeeId, pin };
+    setSession(session);
+    saveLocalCache(employeeId, state);
+    startCloudSync(employeeId);
+    showAppShell();
+    renderHome();
+  } catch (err) {
+    console.error("login failed:", err);
+    loginError.textContent = "Couldn't reach the server — check your internet connection and try again.";
+  } finally {
+    btnLogin.disabled = false;
+    btnLogin.textContent = "Continue";
+  }
+}
+
+btnLogin.addEventListener("click", handleLogin);
+
+function handleLogout() {
+  if (unsubscribeCloud) unsubscribeCloud();
+  unsubscribeCloud = null;
+  clearSession();
+  session = null;
+  state = null;
+  loginEmployeeId.value = "";
+  loginPin.value = "";
+  loginError.textContent = "";
+  showLoginScreen();
+}
+
+function boot() {
+  session = getSession();
+  if (!session) {
+    showLoginScreen();
+    return;
+  }
+  const cached = loadLocalCache(session.employeeId);
+  state = cached || defaultState(session.pin);
+  showAppShell();
+  renderHome();
+  startCloudSync(session.employeeId);
 }
 
 // ---------- formatting helpers ----------
@@ -427,6 +565,8 @@ function renderSettings() {
       ? "Eligible for the 10% פריון bonus ✓"
       : "Not yet eligible — applies automatically 3 months after your start date.";
   }
+
+  document.getElementById("signed-in-as").textContent = session ? `Signed in as: ${session.employeeId}` : "";
 }
 
 document.getElementById("employment-start-date").addEventListener("change", (e) => {
@@ -440,6 +580,8 @@ document.getElementById("remind-points-toggle").addEventListener("change", (e) =
   saveState();
 });
 
+document.getElementById("btn-logout").addEventListener("click", handleLogout);
+
 // ---------- init ----------
 
-renderHome();
+boot();
