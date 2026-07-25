@@ -295,6 +295,12 @@ body {
 .nav-btn.active { color: var(--accent); }
 
 .nav-icon { font-size: 20px; }
+img.nav-icon {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  object-fit: cover;
+}
 
 .modal-backdrop {
   position: fixed;

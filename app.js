@@ -191,7 +191,7 @@ function startOfWeek(date) {
 // ---------- navigation ----------
 
 const SCREENS = ["home", "history", "cafeteria", "settings"];
-const TITLES = { home: "Home", history: "History", cafeteria: "Cafeteria", settings: "Settings" };
+const TITLES = { home: "Home", history: "History", cafeteria: "Luba", settings: "Settings" };
 
 function showScreen(name) {
   for (const s of SCREENS) {
@@ -363,7 +363,7 @@ function showClockOutSummary(punch, pay) {
   body.innerHTML = `
     <p><strong>${punch.actualHours}h</strong> worked (${punch.shiftLabel})</p>
     <p>Pay: <strong>${formatILS(punch.payILS)}</strong>${pay.productivityBonusApplied ? " (incl. +10% פריון)" : ""}</p>
-    <p>Cafeteria points earned: <strong>${punch.mealPoints}</strong> (${punch.voucherNote})</p>
+    <p>Luba points earned: <strong>${punch.mealPoints}</strong> (${punch.voucherNote})</p>
   `;
   modalBody.appendChild(body);
 
@@ -380,9 +380,9 @@ function showClockOutSummary(punch, pay) {
 }
 
 function promptLogPointsUsed() {
-  openModal("Log cafeteria points used?");
+  openModal("Log Luba points used?");
   const p = document.createElement("p");
-  p.textContent = "Did you use cafeteria points this shift?";
+  p.textContent = "Did you use Luba points this shift?";
   modalBody.appendChild(p);
 
   const logBtn = document.createElement("button");
@@ -453,9 +453,16 @@ document.getElementById("btn-log-points").addEventListener("click", openLogPoint
 // ---------- monthly balance ----------
 
 function monthlyBalance(referenceDate = new Date()) {
-  const earned = state.punches
+  let earned = state.punches
     .filter((p) => sameMonth(new Date(p.clockInISO), referenceDate))
     .reduce((sum, p) => sum + p.mealPoints, 0);
+
+  // Eligibility is decided by the shift picked at clock-in, so an in-progress
+  // shift's points count toward the balance immediately, before clock-out.
+  if (state.currentPunch && sameMonth(new Date(state.currentPunch.clockInISO), referenceDate)) {
+    earned += state.currentPunch.shift.points;
+  }
+
   const spent = state.cafeteriaSpending
     .filter((s) => sameMonth(new Date(s.timestampISO), referenceDate))
     .reduce((sum, s) => sum + s.pointsSpent, 0);
