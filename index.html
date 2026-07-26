@@ -97,6 +97,19 @@
   <!-- SETTINGS -->
   <section class="screen" id="screen-settings" data-screen hidden>
     <div class="card">
+      <label class="field-label" for="settings-employment-start-date">Employment start date</label>
+      <input class="field-input" type="date" id="settings-employment-start-date" />
+      <p class="field-hint" id="settings-bonus-hint"></p>
+      <label class="switch-row">
+        <span>Eligible for צה"ל bonus?</span>
+        <input type="checkbox" id="settings-idf-eligible" />
+      </label>
+      <select class="field-input" id="settings-idf-percent" hidden>
+        <option value="2">2%</option>
+        <option value="3">3%</option>
+      </select>
+    </div>
+    <div class="card">
       <label class="switch-row">
         <span>Remind me to log Luba points on clock-out</span>
         <input type="checkbox" id="remind-points-toggle" />

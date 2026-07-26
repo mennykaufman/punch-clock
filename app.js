@@ -724,7 +724,42 @@ function renderSettings() {
   document.getElementById("theme-select").value = state.settings.theme || "system";
   document.getElementById("monthly-hours-goal").value = state.settings.monthlyHoursGoal || "";
   document.getElementById("signed-in-as").textContent = currentUid ? `Signed in as: ${currentUserLabel}` : "";
+
+  document.getElementById("settings-employment-start-date").value = state.settings.employmentStartDate || "";
+  const idfPercent = state.settings.idfBonusPercent || 0;
+  document.getElementById("settings-idf-eligible").checked = idfPercent > 0;
+  document.getElementById("settings-idf-percent").hidden = idfPercent <= 0;
+  document.getElementById("settings-idf-percent").value = idfPercent > 0 ? String(idfPercent) : "2";
+
+  const hint = document.getElementById("settings-bonus-hint");
+  if (!state.settings.employmentStartDate) {
+    hint.textContent = "Set your start date to auto-apply the 10% פריון bonus after 3 months.";
+  } else {
+    const eligible = isProductivityBonusEligible(state.settings.employmentStartDate);
+    hint.textContent = eligible
+      ? "Eligible for the 10% פריון bonus ✓"
+      : "Not yet eligible — applies automatically 3 months after your start date.";
+  }
 }
+
+document.getElementById("settings-employment-start-date").addEventListener("change", (e) => {
+  state.settings.employmentStartDate = e.target.value;
+  saveState();
+  renderSettings();
+});
+
+document.getElementById("settings-idf-eligible").addEventListener("change", (e) => {
+  document.getElementById("settings-idf-percent").hidden = !e.target.checked;
+  state.settings.idfBonusPercent = e.target.checked ? Number(document.getElementById("settings-idf-percent").value) : 0;
+  saveState();
+});
+
+document.getElementById("settings-idf-percent").addEventListener("change", (e) => {
+  if (document.getElementById("settings-idf-eligible").checked) {
+    state.settings.idfBonusPercent = Number(e.target.value);
+    saveState();
+  }
+});
 
 document.getElementById("monthly-hours-goal").addEventListener("change", (e) => {
   state.settings.monthlyHoursGoal = Number(e.target.value) || 0;
