@@ -446,3 +446,9 @@ img.nav-icon {
   color: var(--text);
   border: 1px solid var(--border);
 }
+
+.modal-actions .btn-danger {
+  background: var(--bg);
+  color: var(--danger);
+  border: 1px solid var(--danger);
+}

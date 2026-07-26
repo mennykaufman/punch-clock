@@ -18,6 +18,7 @@ function defaultState(employmentStartDate = "", idfBonusPercent = 0) {
       remindPointsOnClockOut: true,
       theme: "system", // "system" | "dark" | "light"
       monthlyHoursGoal: 0, // 0 = no goal set
+      moreWidgets: { hours: true, shifts: true, pay: true, averages: true, luba: true, export: true },
     },
     currentPunch: null, // { clockInISO, shift: {start,end,vouchers,points} }
     punches: [], // completed punches
@@ -740,6 +741,19 @@ function renderSettings() {
       ? "Eligible for the 10% פריון bonus ✓"
       : "Not yet eligible — applies automatically 3 months after your start date.";
   }
+
+  const widgets = state.settings.moreWidgets || {};
+  for (const key of ["hours", "shifts", "pay", "averages", "luba", "export"]) {
+    document.getElementById(`more-widget-${key}`).checked = widgets[key] !== false;
+  }
+}
+
+for (const key of ["hours", "shifts", "pay", "averages", "luba", "export"]) {
+  document.getElementById(`more-widget-${key}`).addEventListener("change", (e) => {
+    if (!state.settings.moreWidgets) state.settings.moreWidgets = {};
+    state.settings.moreWidgets[key] = e.target.checked;
+    saveState();
+  });
 }
 
 document.getElementById("settings-employment-start-date").addEventListener("change", (e) => {
@@ -832,7 +846,7 @@ function monthExportRows(monthPunches) {
   }));
 }
 
-function exportMonthToXlsx(monthPunches) {
+function exportMonthToXlsx(monthPunches, monthDate) {
   if (typeof XLSX === "undefined") {
     alert("Export library didn't load — check your internet connection and try again.");
     return;
@@ -841,11 +855,11 @@ function exportMonthToXlsx(monthPunches) {
   const sheet = XLSX.utils.json_to_sheet(rows);
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, sheet, "Attendance");
-  const monthName = new Date().toLocaleDateString([], { year: "numeric", month: "2-digit" });
+  const monthName = monthDate.toLocaleDateString([], { year: "numeric", month: "2-digit" });
   XLSX.writeFile(workbook, `attendance-${monthName}.xlsx`);
 }
 
-function exportMonthToPdf(monthPunches) {
+function exportMonthToPdf(monthPunches, monthDate) {
   if (typeof window.jspdf === "undefined") {
     alert("Export library didn't load — check your internet connection and try again.");
     return;
@@ -858,65 +872,101 @@ function exportMonthToPdf(monthPunches) {
     head: [["Date", "In", "Out", "Hours", "Pay", "Points"]],
     body: rows.map((r) => [r.Date, r.In, r.Out, r.Hours, formatILS(r.Pay), r.Points]),
   });
-  const monthName = new Date().toLocaleDateString([], { year: "numeric", month: "2-digit" });
+  const monthName = monthDate.toLocaleDateString([], { year: "numeric", month: "2-digit" });
   doc.save(`attendance-${monthName}.pdf`);
 }
 
 function openMoreModal() {
-  openModal("More");
-  const s = computeMoreStats();
-  const goal = state.settings.monthlyHoursGoal || 0;
+  let viewedMonth = new Date();
 
-  const summary = document.createElement("div");
-  let goalLine = "";
-  if (goal > 0) {
-    const pct = Math.min(100, Math.round((s.monthHours / goal) * 100));
-    goalLine = `<p>Monthly hours goal: <strong>${pct}%</strong> of ${goal}h (${s.monthHours.toFixed(1)}h so far)</p>`;
+  function render() {
+    modalBody.innerHTML = "";
+    modalActions.innerHTML = "";
+
+    const isCurrentMonth = sameMonth(viewedMonth, new Date());
+    const s = computeMoreStats(viewedMonth);
+    const goal = state.settings.monthlyHoursGoal || 0;
+    const widgets = state.settings.moreWidgets || {};
+    const monthLabel = viewedMonth.toLocaleDateString([], { year: "numeric", month: "long" });
+
+    const navRow = document.createElement("div");
+    navRow.className = "switch-row";
+    navRow.innerHTML = `
+      <button class="breakdown-link" id="more-prev-month" type="button">◀ Prev</button>
+      <strong>${monthLabel}</strong>
+      <button class="breakdown-link" id="more-next-month" type="button" ${isCurrentMonth ? "disabled" : ""}>Next ▶</button>
+    `;
+    modalBody.appendChild(navRow);
+    navRow.querySelector("#more-prev-month").addEventListener("click", () => {
+      viewedMonth = new Date(viewedMonth.getFullYear(), viewedMonth.getMonth() - 1, 1);
+      render();
+    });
+    navRow.querySelector("#more-next-month").addEventListener("click", () => {
+      if (isCurrentMonth) return;
+      viewedMonth = new Date(viewedMonth.getFullYear(), viewedMonth.getMonth() + 1, 1);
+      render();
+    });
+
+    let html = "";
+    if (widgets.hours !== false) {
+      html += `<p class="card-title">Hours</p><p>${s.monthHours.toFixed(1)}h this month${isCurrentMonth ? ` · ${s.weekHours.toFixed(1)}h this week` : ""}</p>`;
+      if (goal > 0 && isCurrentMonth) {
+        const pct = Math.min(100, Math.round((s.monthHours / goal) * 100));
+        html += `<p>Monthly hours goal: <strong>${pct}%</strong> of ${goal}h</p>`;
+      }
+    }
+    if (widgets.shifts !== false) {
+      html += `<p class="card-title">Shifts</p><p>${s.monthShiftCount} actual shifts this month</p>`;
+    }
+    if (widgets.pay !== false) {
+      html += `<p class="card-title">Total pay</p><p>${formatILS(s.monthPay)} this month${isCurrentMonth ? ` · ${formatILS(s.weekPay)} this week` : ""}</p>`;
+    }
+    if (widgets.averages !== false) {
+      html += `<p class="card-title">Averages</p><p>${s.avgHoursPerShift.toFixed(1)}h/shift · ${formatILS(s.avgPayPerShift)}/shift · ${formatILS(s.avgHourlyPay)}/h effective</p>`;
+    }
+    if (widgets.luba !== false) {
+      html += `<p class="card-title">Luba points</p><p>${s.lubaEarned} earned − ${s.lubaSpent} spent = ${s.lubaBalance} balance</p><p>Used: ${s.countByType.meat} בשרי (${s.spentByType.meat} pts) · ${s.countByType.dairy} חלבי (${s.spentByType.dairy} pts)${s.countByType.manual ? ` · ${s.countByType.manual} manual (${s.spentByType.manual} pts)` : ""}</p>`;
+    }
+    const summary = document.createElement("div");
+    summary.innerHTML = html;
+    modalBody.appendChild(summary);
+
+    if (widgets.export !== false) {
+      const exportRow = document.createElement("div");
+      exportRow.style.display = "flex";
+      exportRow.style.gap = "10px";
+      const exportXlsxBtn = document.createElement("button");
+      exportXlsxBtn.className = "secondary-button";
+      exportXlsxBtn.textContent = "Export Excel";
+      exportXlsxBtn.style.marginBottom = "0";
+      exportXlsxBtn.addEventListener("click", () => exportMonthToXlsx(s.monthPunches, viewedMonth));
+      const exportPdfBtn = document.createElement("button");
+      exportPdfBtn.className = "secondary-button";
+      exportPdfBtn.textContent = "Export PDF";
+      exportPdfBtn.style.marginBottom = "0";
+      exportPdfBtn.addEventListener("click", () => exportMonthToPdf(s.monthPunches, viewedMonth));
+      exportRow.append(exportXlsxBtn, exportPdfBtn);
+      modalBody.appendChild(exportRow);
+    }
+
+    const addBtn = document.createElement("button");
+    addBtn.className = "btn-primary";
+    addBtn.textContent = "+ Add shift manually";
+    addBtn.addEventListener("click", () => {
+      closeModal();
+      openManualEntryModal();
+    });
+
+    const closeBtn = document.createElement("button");
+    closeBtn.className = "btn-plain";
+    closeBtn.textContent = "Close";
+    closeBtn.addEventListener("click", closeModal);
+
+    modalActions.append(closeBtn, addBtn);
   }
-  summary.innerHTML = `
-    <p class="card-title">This week</p>
-    <p>${s.weekHours.toFixed(1)}h · ${formatILS(s.weekPay)}</p>
-    <p class="card-title">This month</p>
-    <p>${s.monthHours.toFixed(1)}h · ${formatILS(s.monthPay)} · ${s.monthShiftCount} actual shifts</p>
-    ${goalLine}
-    <p class="card-title">Averages this month</p>
-    <p>${s.avgHoursPerShift.toFixed(1)}h/shift · ${formatILS(s.avgPayPerShift)}/shift · ${formatILS(s.avgHourlyPay)}/h effective</p>
-    <p class="card-title">Luba points this month</p>
-    <p>${s.lubaEarned} earned − ${s.lubaSpent} spent = ${s.lubaBalance} balance</p>
-    <p>Used: ${s.countByType.meat} בשרי (${s.spentByType.meat} pts) · ${s.countByType.dairy} חלבי (${s.spentByType.dairy} pts)${s.countByType.manual ? ` · ${s.countByType.manual} manual (${s.spentByType.manual} pts)` : ""}</p>
-  `;
-  modalBody.appendChild(summary);
 
-  const exportRow = document.createElement("div");
-  exportRow.style.display = "flex";
-  exportRow.style.gap = "10px";
-  const exportXlsxBtn = document.createElement("button");
-  exportXlsxBtn.className = "secondary-button";
-  exportXlsxBtn.textContent = "Export Excel";
-  exportXlsxBtn.style.marginBottom = "0";
-  exportXlsxBtn.addEventListener("click", () => exportMonthToXlsx(s.monthPunches));
-  const exportPdfBtn = document.createElement("button");
-  exportPdfBtn.className = "secondary-button";
-  exportPdfBtn.textContent = "Export PDF";
-  exportPdfBtn.style.marginBottom = "0";
-  exportPdfBtn.addEventListener("click", () => exportMonthToPdf(s.monthPunches));
-  exportRow.append(exportXlsxBtn, exportPdfBtn);
-  modalBody.appendChild(exportRow);
-
-  const addBtn = document.createElement("button");
-  addBtn.className = "btn-primary";
-  addBtn.textContent = "+ Add shift manually";
-  addBtn.addEventListener("click", () => {
-    closeModal();
-    openManualEntryModal();
-  });
-
-  const closeBtn = document.createElement("button");
-  closeBtn.className = "btn-plain";
-  closeBtn.textContent = "Close";
-  closeBtn.addEventListener("click", closeModal);
-
-  modalActions.append(closeBtn, addBtn);
+  openModal("More");
+  render();
 }
 
 document.getElementById("btn-open-more").addEventListener("click", openMoreModal);
@@ -1024,17 +1074,27 @@ function openEditPunchModal(punch) {
       return;
     }
 
+    const clockInChanged = clockInDate.getTime() !== new Date(punch.clockInISO).getTime();
     const changedFields = [];
-    if (clockInDate.getTime() !== new Date(punch.clockInISO).getTime()) changedFields.push("clockIn");
+    if (clockInChanged) changedFields.push("clockIn");
     if (clockOutDate.getTime() !== new Date(punch.clockOutISO).getTime()) changedFields.push("clockOut");
 
-    // Keep the shift's original start fixed (same eligibility rule as everywhere else);
-    // only the actual end gets re-matched (or re-asked) against the edited clock-out time.
-    const [originalStart, originalEnd] = punch.shiftLabel.split("-");
-    const pseudoShift = { start: originalStart, end: originalEnd, points: punch.mealPoints, vouchers: punch.voucherNote };
     closeModal();
-    const shift = await resolveActualShift(pseudoShift, clockOutDate);
-    const { punch: recalculated } = buildPunch(clockInDate, clockOutDate, shift, pseudoShift);
+
+    let shift, pickedShift;
+    if (clockInChanged) {
+      // The clock-in time moved, so the whole shift eligibility window (±30 min) has to be
+      // re-evaluated from scratch — an old match (e.g. an 11:00 shift) must not survive a
+      // move to 13:50, it needs to be re-decided against the new time.
+      pickedShift = await resolveShiftForClockIn(clockInDate);
+      if (!pickedShift) return; // user cancelled the shift picker — leave the punch unedited
+    } else {
+      // Only the clock-out moved: keep the shift's start fixed, re-match just the end.
+      const [originalStart, originalEnd] = punch.shiftLabel.split("-");
+      pickedShift = { start: originalStart, end: originalEnd, points: punch.mealPoints, vouchers: punch.voucherNote };
+    }
+    shift = await resolveActualShift(pickedShift, clockOutDate);
+    const { punch: recalculated } = buildPunch(clockInDate, clockOutDate, shift, pickedShift);
 
     const priorEditedFields = punch.editedFields || [];
     const editedFields = [...new Set([...priorEditedFields, ...changedFields])];
@@ -1044,12 +1104,41 @@ function openEditPunchModal(punch) {
     renderHome();
   });
 
+  const deleteBtn = document.createElement("button");
+  deleteBtn.className = "btn-danger";
+  deleteBtn.textContent = "Delete";
+  deleteBtn.addEventListener("click", () => {
+    closeModal();
+    openModal("Delete this shift?");
+    const p = document.createElement("p");
+    p.textContent = `Delete the ${punch.shiftLabel} shift on ${formatDate(new Date(punch.clockInISO))}? This can't be undone.`;
+    modalBody.appendChild(p);
+
+    const confirmBtn = document.createElement("button");
+    confirmBtn.className = "btn-danger";
+    confirmBtn.textContent = "Delete";
+    confirmBtn.addEventListener("click", () => {
+      state.punches = state.punches.filter((p) => p.id !== punch.id);
+      saveState();
+      closeModal();
+      renderHistory();
+      renderHome();
+    });
+
+    const cancelDeleteBtn = document.createElement("button");
+    cancelDeleteBtn.className = "btn-plain";
+    cancelDeleteBtn.textContent = "Cancel";
+    cancelDeleteBtn.addEventListener("click", closeModal);
+
+    modalActions.append(cancelDeleteBtn, confirmBtn);
+  });
+
   const cancelBtn = document.createElement("button");
   cancelBtn.className = "btn-plain";
   cancelBtn.textContent = "Cancel";
   cancelBtn.addEventListener("click", closeModal);
 
-  modalActions.append(cancelBtn, saveBtn);
+  modalActions.append(deleteBtn, cancelBtn, saveBtn);
 }
 
 // ---------- pay breakdown ----------
