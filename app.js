@@ -595,6 +595,51 @@ document.getElementById("remind-points-toggle").addEventListener("change", (e) =
 
 document.getElementById("btn-logout").addEventListener("click", handleLogout);
 
+// ---------- render: more (full punch log) ----------
+
+function renderMoreLog() {
+  const tbody = document.getElementById("more-log-body");
+  tbody.innerHTML = "";
+
+  const sorted = [...state.punches].sort((a, b) => new Date(a.clockInISO) - new Date(b.clockInISO));
+
+  if (!sorted.length) {
+    tbody.innerHTML = `<tr><td colspan="8" class="list-empty">No shifts logged yet</td></tr>`;
+    return;
+  }
+
+  let runningHours = 0;
+  let runningPay = 0;
+  for (const p of sorted) {
+    runningHours += p.actualHours;
+    runningPay += p.payILS;
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${formatDate(new Date(p.clockInISO))}</td>
+      <td>${formatTime(new Date(p.clockInISO))}</td>
+      <td>${formatTime(new Date(p.clockOutISO))}</td>
+      <td>${p.actualHours}h</td>
+      <td>${formatILS(p.payILS)}</td>
+      <td>${p.mealPoints}</td>
+      <td>${runningHours.toFixed(1)}h</td>
+      <td>${formatILS(runningPay)}</td>
+    `;
+    tbody.appendChild(tr);
+  }
+}
+
+function openMoreScreen() {
+  for (const s of SCREENS) {
+    document.getElementById(`screen-${s}`).hidden = true;
+  }
+  document.getElementById("screen-more").hidden = false;
+  document.getElementById("topbar-title").textContent = "More";
+  renderMoreLog();
+}
+
+document.getElementById("btn-open-more").addEventListener("click", openMoreScreen);
+document.getElementById("btn-more-back").addEventListener("click", () => showScreen("settings"));
+
 // ---------- init ----------
 
 boot();

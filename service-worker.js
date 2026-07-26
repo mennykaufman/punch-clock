@@ -1,4 +1,4 @@
-const CACHE_NAME = "punchclock-v3";
+const CACHE_NAME = "punchclock-v4";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -14,7 +14,12 @@ const APP_SHELL = [
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL)).then(() => self.skipWaiting())
+    caches
+      .open(CACHE_NAME)
+      // {cache: "reload"} bypasses the browser's normal HTTP cache so a fresh
+      // deploy is never masked by GitHub Pages' Cache-Control: max-age=600.
+      .then((cache) => Promise.all(APP_SHELL.map((url) => fetch(url, { cache: "reload" }).then((res) => cache.put(url, res)))))
+      .then(() => self.skipWaiting())
   );
 });
 
@@ -26,20 +31,20 @@ self.addEventListener("activate", (event) => {
   );
 });
 
-// Only cache-first our own static app shell. Anything cross-origin (the Apps Script
-// API calls) always goes straight to the network — never cached, never intercepted.
+// Network-first for our own app shell: always prefer the live version while
+// online (so updates show up immediately), and only fall back to the cached
+// copy when there's no connection at all. Anything cross-origin is untouched.
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
   if (url.origin !== self.location.origin || event.request.method !== "GET") return;
 
   event.respondWith(
-    caches.match(event.request).then((cached) => {
-      if (cached) return cached;
-      return fetch(event.request).then((response) => {
+    fetch(event.request)
+      .then((response) => {
         const copy = response.clone();
         caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
         return response;
-      });
-    })
+      })
+      .catch(() => caches.match(event.request))
   );
 });

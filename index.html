@@ -99,6 +99,29 @@
       <p class="field-hint" id="signed-in-as"></p>
       <button class="secondary-button" id="btn-logout" type="button">Switch user / Log out</button>
     </div>
+    <button class="secondary-button" id="btn-open-more" type="button">More — full punch log</button>
+  </section>
+
+  <!-- MORE (detailed spreadsheet-style log, reached from Settings) -->
+  <section class="screen" id="screen-more" hidden>
+    <button class="secondary-button" id="btn-more-back" type="button">← Back to Settings</button>
+    <div class="table-scroll">
+      <table class="log-table">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>In</th>
+            <th>Out</th>
+            <th>Hours</th>
+            <th>Pay</th>
+            <th>Points</th>
+            <th>Total Hours</th>
+            <th>Total Pay</th>
+          </tr>
+        </thead>
+        <tbody id="more-log-body"></tbody>
+      </table>
+    </div>
   </section>
 
 </main>
