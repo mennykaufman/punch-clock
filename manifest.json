@@ -1,6 +1,6 @@
 {
-  "name": "Punch Clock",
-  "short_name": "PunchClock",
+  "name": "TrackO'clock",
+  "short_name": "TrackO'clock",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
