@@ -14,8 +14,14 @@
 </head>
 <body>
 
+<!-- SPLASH (shown briefly while Firebase checks for a persisted session) -->
+<div id="splash-screen">
+  <img src="icons/icon-192.png" alt="" class="splash-logo" />
+  <div class="spinner"></div>
+</div>
+
 <!-- LOGIN -->
-<div id="login-screen">
+<div id="login-screen" hidden>
   <div class="card login-card" id="google-signin-card">
     <p class="card-title">Sign in</p>
     <button class="big-button" id="btn-google-signin" type="button">Sign in with Google</button>
@@ -68,6 +74,11 @@
 
   <!-- MONTHLY ATTENDANCE (formerly History) -->
   <section class="screen" id="screen-history" data-screen hidden>
+    <div class="switch-row" id="history-month-nav">
+      <button class="breakdown-link" id="history-prev-month" type="button">◀ Prev</button>
+      <strong id="history-month-label">Month</strong>
+      <button class="breakdown-link" id="history-next-month" type="button">Next ▶</button>
+    </div>
     <button class="secondary-button" id="btn-open-more" type="button">More</button>
     <div class="table-scroll">
       <table class="log-table">

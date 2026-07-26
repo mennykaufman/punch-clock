@@ -1,5 +1,5 @@
 import { SHIFT_CATALOG, matchShiftByClockIn, matchShiftByActualEnd } from "./data/shifts.js";
-import { calculatePay, isProductivityBonusEligible } from "./data/payRules.js";
+import { calculatePay, isProductivityBonusEligible, BASE_WAGE_ILS } from "./data/payRules.js";
 import {
   fetchUserData,
   saveUserData,
@@ -74,6 +74,7 @@ function withTimeout(promise, ms, message) {
 
 // ---------- auth / session ----------
 
+const splashScreen = document.getElementById("splash-screen");
 const loginScreen = document.getElementById("login-screen");
 const appShell = document.getElementById("app-shell");
 const loginError = document.getElementById("login-error");
@@ -89,6 +90,7 @@ const welcomeError = document.getElementById("welcome-error");
 const btnWelcomeContinue = document.getElementById("btn-welcome-continue");
 
 function showLoginScreen() {
+  splashScreen.hidden = true;
   loginScreen.hidden = false;
   appShell.hidden = true;
   googleSignInCard.hidden = false;
@@ -96,11 +98,14 @@ function showLoginScreen() {
 }
 
 function showWelcomeCard() {
+  splashScreen.hidden = true;
+  loginScreen.hidden = false;
   googleSignInCard.hidden = true;
   welcomeCard.hidden = false;
 }
 
 function showAppShell() {
+  splashScreen.hidden = true;
   loginScreen.hidden = true;
   appShell.hidden = false;
 }
@@ -648,14 +653,22 @@ function renderHome() {
 
 // ---------- render: history (Monthly Attendance) ----------
 
+let historyViewedMonth = new Date();
+
 function renderHistory() {
+  const isCurrentMonth = sameMonth(historyViewedMonth, new Date());
+  document.getElementById("history-month-label").textContent =
+    historyViewedMonth.toLocaleDateString([], { year: "numeric", month: "long" });
+  document.getElementById("history-next-month").disabled = isCurrentMonth;
+
   const tbody = document.getElementById("history-table-body");
   tbody.innerHTML = "";
 
-  const sorted = [...state.punches].sort((a, b) => new Date(a.clockInISO) - new Date(b.clockInISO));
+  const monthPunches = state.punches.filter((p) => sameMonth(new Date(p.clockInISO), historyViewedMonth));
+  const sorted = [...monthPunches].sort((a, b) => new Date(a.clockInISO) - new Date(b.clockInISO));
 
   if (!sorted.length) {
-    tbody.innerHTML = `<tr><td colspan="3" class="list-empty">No shifts logged yet</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="3" class="list-empty">No shifts logged this month</td></tr>`;
     return;
   }
 
@@ -679,6 +692,17 @@ document.getElementById("history-table-body").addEventListener("click", (e) => {
   if (!tr) return;
   const punch = state.punches.find((p) => p.id === tr.dataset.punchId);
   if (punch) openEditPunchModal(punch);
+});
+
+document.getElementById("history-prev-month").addEventListener("click", () => {
+  historyViewedMonth = new Date(historyViewedMonth.getFullYear(), historyViewedMonth.getMonth() - 1, 1);
+  renderHistory();
+});
+
+document.getElementById("history-next-month").addEventListener("click", () => {
+  if (sameMonth(historyViewedMonth, new Date())) return;
+  historyViewedMonth = new Date(historyViewedMonth.getFullYear(), historyViewedMonth.getMonth() + 1, 1);
+  renderHistory();
 });
 
 // ---------- render: cafeteria ----------
@@ -801,7 +825,9 @@ function toDatetimeLocalValue(date) {
 }
 
 function computeMoreStats(referenceDate = new Date()) {
-  const weekStart = startOfWeek(referenceDate);
+  // Week stats are always relative to the real current week, regardless of which
+  // month is being browsed — they're only ever shown alongside the current month anyway.
+  const weekStart = startOfWeek(new Date());
   const weekPunches = state.punches.filter((p) => new Date(p.clockInISO) >= weekStart);
   const monthPunches = state.punches.filter((p) => sameMonth(new Date(p.clockInISO), referenceDate));
   const sum = (arr, key) => arr.reduce((s, p) => s + p[key], 0);
@@ -876,97 +902,87 @@ function exportMonthToPdf(monthPunches, monthDate) {
   doc.save(`attendance-${monthName}.pdf`);
 }
 
+// The month shown here always matches whatever month is currently browsed on the
+// Monthly Attendance screen (historyViewedMonth) — navigating months happens there,
+// not in this modal, so the two never drift out of sync.
 function openMoreModal() {
-  let viewedMonth = new Date();
+  openModal("More");
 
-  function render() {
-    modalBody.innerHTML = "";
-    modalActions.innerHTML = "";
+  const isCurrentMonth = sameMonth(historyViewedMonth, new Date());
+  const s = computeMoreStats(historyViewedMonth);
+  const goal = state.settings.monthlyHoursGoal || 0;
+  const widgets = state.settings.moreWidgets || {};
+  const monthLabel = historyViewedMonth.toLocaleDateString([], { year: "numeric", month: "long" });
 
-    const isCurrentMonth = sameMonth(viewedMonth, new Date());
-    const s = computeMoreStats(viewedMonth);
-    const goal = state.settings.monthlyHoursGoal || 0;
-    const widgets = state.settings.moreWidgets || {};
-    const monthLabel = viewedMonth.toLocaleDateString([], { year: "numeric", month: "long" });
+  const monthHeading = document.createElement("p");
+  monthHeading.className = "card-title";
+  monthHeading.textContent = monthLabel;
+  modalBody.appendChild(monthHeading);
 
-    const navRow = document.createElement("div");
-    navRow.className = "switch-row";
-    navRow.innerHTML = `
-      <button class="breakdown-link" id="more-prev-month" type="button">◀ Prev</button>
-      <strong>${monthLabel}</strong>
-      <button class="breakdown-link" id="more-next-month" type="button" ${isCurrentMonth ? "disabled" : ""}>Next ▶</button>
-    `;
-    modalBody.appendChild(navRow);
-    navRow.querySelector("#more-prev-month").addEventListener("click", () => {
-      viewedMonth = new Date(viewedMonth.getFullYear(), viewedMonth.getMonth() - 1, 1);
-      render();
-    });
-    navRow.querySelector("#more-next-month").addEventListener("click", () => {
-      if (isCurrentMonth) return;
-      viewedMonth = new Date(viewedMonth.getFullYear(), viewedMonth.getMonth() + 1, 1);
-      render();
-    });
+  let html = "";
+  if (widgets.hours !== false) {
+    html += `<p class="card-title">Hours</p><p>${s.monthHours.toFixed(1)}h this month${isCurrentMonth ? ` · ${s.weekHours.toFixed(1)}h this week` : ""}</p>`;
+    if (goal > 0 && isCurrentMonth) {
+      const pct = Math.min(100, Math.round((s.monthHours / goal) * 100));
+      html += `<p>Monthly hours goal: <strong>${pct}%</strong> of ${goal}h</p>`;
+    }
+  }
+  if (widgets.shifts !== false) {
+    html += `<p class="card-title">Shifts</p><p>${s.monthShiftCount} actual shifts this month</p>`;
+  }
+  if (widgets.pay !== false) {
+    html += `<p class="card-title">Total pay</p><p><button class="breakdown-link" id="more-pay-breakdown" type="button">${formatILS(s.monthPay)}</button> this month${isCurrentMonth ? ` · ${formatILS(s.weekPay)} this week` : ""}</p>`;
+  }
+  if (widgets.averages !== false) {
+    html += `<p class="card-title">Averages</p><p>${s.avgHoursPerShift.toFixed(1)}h/shift · ${formatILS(s.avgPayPerShift)}/shift · ${formatILS(s.avgHourlyPay)}/h effective</p>`;
+  }
+  if (widgets.luba !== false) {
+    html += `<p class="card-title">Luba points</p><p>${s.lubaEarned} earned − ${s.lubaSpent} spent = ${s.lubaBalance} balance</p><p>Used: ${s.countByType.meat} בשרי (${s.spentByType.meat} pts) · ${s.countByType.dairy} חלבי (${s.spentByType.dairy} pts)${s.countByType.manual ? ` · ${s.countByType.manual} manual (${s.spentByType.manual} pts)` : ""}</p>`;
+  }
+  const summary = document.createElement("div");
+  summary.innerHTML = html;
+  modalBody.appendChild(summary);
 
-    let html = "";
-    if (widgets.hours !== false) {
-      html += `<p class="card-title">Hours</p><p>${s.monthHours.toFixed(1)}h this month${isCurrentMonth ? ` · ${s.weekHours.toFixed(1)}h this week` : ""}</p>`;
-      if (goal > 0 && isCurrentMonth) {
-        const pct = Math.min(100, Math.round((s.monthHours / goal) * 100));
-        html += `<p>Monthly hours goal: <strong>${pct}%</strong> of ${goal}h</p>`;
-      }
-    }
-    if (widgets.shifts !== false) {
-      html += `<p class="card-title">Shifts</p><p>${s.monthShiftCount} actual shifts this month</p>`;
-    }
-    if (widgets.pay !== false) {
-      html += `<p class="card-title">Total pay</p><p>${formatILS(s.monthPay)} this month${isCurrentMonth ? ` · ${formatILS(s.weekPay)} this week` : ""}</p>`;
-    }
-    if (widgets.averages !== false) {
-      html += `<p class="card-title">Averages</p><p>${s.avgHoursPerShift.toFixed(1)}h/shift · ${formatILS(s.avgPayPerShift)}/shift · ${formatILS(s.avgHourlyPay)}/h effective</p>`;
-    }
-    if (widgets.luba !== false) {
-      html += `<p class="card-title">Luba points</p><p>${s.lubaEarned} earned − ${s.lubaSpent} spent = ${s.lubaBalance} balance</p><p>Used: ${s.countByType.meat} בשרי (${s.spentByType.meat} pts) · ${s.countByType.dairy} חלבי (${s.spentByType.dairy} pts)${s.countByType.manual ? ` · ${s.countByType.manual} manual (${s.spentByType.manual} pts)` : ""}</p>`;
-    }
-    const summary = document.createElement("div");
-    summary.innerHTML = html;
-    modalBody.appendChild(summary);
-
-    if (widgets.export !== false) {
-      const exportRow = document.createElement("div");
-      exportRow.style.display = "flex";
-      exportRow.style.gap = "10px";
-      const exportXlsxBtn = document.createElement("button");
-      exportXlsxBtn.className = "secondary-button";
-      exportXlsxBtn.textContent = "Export Excel";
-      exportXlsxBtn.style.marginBottom = "0";
-      exportXlsxBtn.addEventListener("click", () => exportMonthToXlsx(s.monthPunches, viewedMonth));
-      const exportPdfBtn = document.createElement("button");
-      exportPdfBtn.className = "secondary-button";
-      exportPdfBtn.textContent = "Export PDF";
-      exportPdfBtn.style.marginBottom = "0";
-      exportPdfBtn.addEventListener("click", () => exportMonthToPdf(s.monthPunches, viewedMonth));
-      exportRow.append(exportXlsxBtn, exportPdfBtn);
-      modalBody.appendChild(exportRow);
-    }
-
-    const addBtn = document.createElement("button");
-    addBtn.className = "btn-primary";
-    addBtn.textContent = "+ Add shift manually";
-    addBtn.addEventListener("click", () => {
+  const payBreakdownBtn = summary.querySelector("#more-pay-breakdown");
+  if (payBreakdownBtn) {
+    payBreakdownBtn.addEventListener("click", () => {
       closeModal();
-      openManualEntryModal();
+      openMonthlyBreakdownModal(s.monthPunches, historyViewedMonth);
     });
-
-    const closeBtn = document.createElement("button");
-    closeBtn.className = "btn-plain";
-    closeBtn.textContent = "Close";
-    closeBtn.addEventListener("click", closeModal);
-
-    modalActions.append(closeBtn, addBtn);
   }
 
-  openModal("More");
-  render();
+  if (widgets.export !== false) {
+    const exportRow = document.createElement("div");
+    exportRow.style.display = "flex";
+    exportRow.style.gap = "10px";
+    const exportXlsxBtn = document.createElement("button");
+    exportXlsxBtn.className = "secondary-button";
+    exportXlsxBtn.textContent = "Export Excel";
+    exportXlsxBtn.style.marginBottom = "0";
+    exportXlsxBtn.addEventListener("click", () => exportMonthToXlsx(s.monthPunches, historyViewedMonth));
+    const exportPdfBtn = document.createElement("button");
+    exportPdfBtn.className = "secondary-button";
+    exportPdfBtn.textContent = "Export PDF";
+    exportPdfBtn.style.marginBottom = "0";
+    exportPdfBtn.addEventListener("click", () => exportMonthToPdf(s.monthPunches, historyViewedMonth));
+    exportRow.append(exportXlsxBtn, exportPdfBtn);
+    modalBody.appendChild(exportRow);
+  }
+
+  const addBtn = document.createElement("button");
+  addBtn.className = "btn-primary";
+  addBtn.textContent = "+ Add shift manually";
+  addBtn.addEventListener("click", () => {
+    closeModal();
+    openManualEntryModal();
+  });
+
+  const closeBtn = document.createElement("button");
+  closeBtn.className = "btn-plain";
+  closeBtn.textContent = "Close";
+  closeBtn.addEventListener("click", closeModal);
+
+  modalActions.append(closeBtn, addBtn);
 }
 
 document.getElementById("btn-open-more").addEventListener("click", openMoreModal);
@@ -1141,7 +1157,94 @@ function openEditPunchModal(punch) {
   modalActions.append(deleteBtn, cancelBtn, saveBtn);
 }
 
-// ---------- pay breakdown ----------
+// ---------- monthly pay breakdown ----------
+
+function round2(n) {
+  return Math.round(n * 100) / 100;
+}
+
+// Aggregates every punch's stored per-shift breakdown into one month-wide summary:
+// hours (and ILS) per exact rate percentage, plus how much of the total came from
+// each bonus. Bonuses are unwound in the same order calculatePay applies them
+// (base -> +10% פריון -> +IDF%) so each bonus's own ILS contribution is isolated.
+function computeMonthlyPayBreakdown(monthPunches) {
+  const rateHours = {};
+  let totalPreBonus = 0;
+  let totalProductivityAmount = 0;
+  let totalIdfAmount = 0;
+  let totalFinal = 0;
+  let anyProductivityBonus = false;
+  const idfPercentsUsed = new Set();
+
+  for (const p of monthPunches) {
+    const pay = p.payBreakdown;
+    if (!pay || !pay.hoursByRate) continue; // older entries predating this breakdown format
+
+    for (const r of pay.hoursByRate) {
+      rateHours[r.ratePercent] = (rateHours[r.ratePercent] || 0) + r.hours;
+    }
+
+    const base = pay.preBonusPayILS;
+    const afterProductivity = pay.productivityBonusApplied ? base * 1.1 : base;
+    const afterIdf = pay.idfBonusPercent ? afterProductivity * (1 + pay.idfBonusPercent / 100) : afterProductivity;
+
+    totalPreBonus += base;
+    totalProductivityAmount += afterProductivity - base;
+    totalIdfAmount += afterIdf - afterProductivity;
+    totalFinal += pay.finalPayILS;
+    if (pay.productivityBonusApplied) anyProductivityBonus = true;
+    if (pay.idfBonusPercent) idfPercentsUsed.add(pay.idfBonusPercent);
+  }
+
+  const hoursByRate = Object.entries(rateHours)
+    .map(([rate, hours]) => ({
+      ratePercent: Number(rate),
+      hours: round2(hours),
+      amountILS: round2(hours * BASE_WAGE_ILS * (Number(rate) / 100)),
+    }))
+    .sort((a, b) => a.ratePercent - b.ratePercent);
+
+  return {
+    hoursByRate,
+    totalPreBonus: round2(totalPreBonus),
+    totalProductivityAmount: round2(totalProductivityAmount),
+    totalIdfAmount: round2(totalIdfAmount),
+    totalFinal: round2(totalFinal),
+    anyProductivityBonus,
+    idfPercentsUsed,
+  };
+}
+
+function openMonthlyBreakdownModal(monthPunches, monthDate) {
+  const monthLabel = monthDate.toLocaleDateString([], { year: "numeric", month: "long" });
+  openModal(`Pay breakdown — ${monthLabel}`);
+
+  if (!monthPunches.length) {
+    modalBody.innerHTML = `<p class="field-hint">No shifts this month.</p>`;
+  } else {
+    const b = computeMonthlyPayBreakdown(monthPunches);
+    const rateRows = b.hoursByRate.map((r) => [`Hours at ${r.ratePercent}%`, `${r.hours}h — ${formatILS(r.amountILS)}`]);
+    const idfLabel = b.idfPercentsUsed.size === 1
+      ? `+${[...b.idfPercentsUsed][0]}% צה"ל bonus`
+      : `צה"ל bonus`;
+    const rows = [
+      ...rateRows,
+      ["Before bonuses", formatILS(b.totalPreBonus)],
+      ["+10% פריון bonus", b.anyProductivityBonus ? formatILS(b.totalProductivityAmount) : "Not applied"],
+      [idfLabel, b.idfPercentsUsed.size ? formatILS(b.totalIdfAmount) : "Not applied"],
+      ["Total pay this month", formatILS(b.totalFinal)],
+    ];
+    modalBody.innerHTML = rows.map(([label, value]) => `<p>${label}: <strong>${value}</strong></p>`).join("");
+  }
+
+  const closeBtn = document.createElement("button");
+  closeBtn.className = "btn-primary";
+  closeBtn.textContent = "Close";
+  closeBtn.addEventListener("click", closeModal);
+  modalActions.appendChild(closeBtn);
+}
+
+// ---------- pay breakdown (single shift) ----------
 
 function openPayBreakdownModal(punch) {
   openModal("Pay breakdown");
