@@ -131,31 +131,22 @@ export function distinctStarts() {
   return [...new Set(SHIFT_CATALOG.map((s) => s.start))];
 }
 
-// Given an actual clock-in Date, find the nearest scheduled start time (wrapping across midnight),
-// then return the candidate rows sharing that start. maxDistanceMinutes caps how far a punch can be
-// from a real scheduled start before we give up on auto-matching entirely.
-export function matchShiftByClockIn(clockInDate, maxDistanceMinutes = 60) {
+// Given an actual clock-in Date, return every catalog row whose scheduled start falls
+// within windowMinutes of the actual time (wrapping across midnight) — e.g. clocking in
+// at 13:35 with a 30-minute window shows shifts starting 13:05–14:05, not 12:30 or 13:00.
+// If nothing is within the window, the caller should fall back to the full manual list.
+export function matchShiftByClockIn(clockInDate, windowMinutes = 30) {
   const actualMinutes = clockInDate.getHours() * 60 + clockInDate.getMinutes();
-  const starts = distinctStarts();
 
-  let best = null;
-  let bestDist = Infinity;
-  for (const start of starts) {
-    const startMinutes = toMinutes(start);
-    let dist = Math.abs(startMinutes - actualMinutes);
-    dist = Math.min(dist, 1440 - dist); // wrap around midnight
-    if (dist < bestDist) {
-      bestDist = dist;
-      best = start;
-    }
-  }
+  const candidates = SHIFT_CATALOG.filter((s) => {
+    const dist = Math.abs(toMinutes(s.start) - actualMinutes);
+    return Math.min(dist, 1440 - dist) <= windowMinutes;
+  });
 
-  if (best === null || bestDist > maxDistanceMinutes) {
+  if (!candidates.length) {
     return { matched: false, candidates: [] };
   }
-
-  const candidates = SHIFT_CATALOG.filter((s) => s.start === best);
-  return { matched: true, start: best, candidates };
+  return { matched: true, candidates };
 }
 
 // Given the shift's start (already fixed at clock-in) and the ACTUAL clock-out time,

@@ -65,7 +65,7 @@ export function isProductivityBonusEligible(employmentStartDate, today = new Dat
 }
 
 // clockIn/clockOut: real Date objects captured at the moment of punching (clockOut > clockIn).
-// options: { productivityBonusEligible: boolean }
+// options: { productivityBonusEligible: boolean, idfBonusPercent: 0|2|3 }
 export function calculatePay(clockIn, clockOut, options = {}) {
   const totalMinutes = Math.round((clockOut.getTime() - clockIn.getTime()) / 60000);
   if (totalMinutes <= 0) {
@@ -81,7 +81,14 @@ export function calculatePay(clockIn, clockOut, options = {}) {
   const standardMinutes = flip ? NIGHT_STANDARD_MINUTES : DAY_STANDARD_MINUTES;
 
   const hoursByCategory = { day: 0, evening: 0, night: 0, shabbat: 0 };
-  let overtimeMinutes = 0;
+  // Minutes are bucketed by their exact final rate percentage (e.g. "100", "130", "150",
+  // "162.5") so the breakdown can show precisely which rates applied and for how long —
+  // night (150%) and Shabbat (300%) always land in separate buckets since they're
+  // different percentages, and any rate with 0 minutes just never appears.
+  const minutesByRatePercent = {};
+  let regularMinutes = 0;
+  let otTier1Minutes = 0; // the "125%-of-category" bracket (day-standard shifts only)
+  let otTier2Minutes = 0; // the "150%-of-category" bracket (day-standard past tier 1, and the single night-shift OT bump)
   let preBonusPay = 0;
 
   for (let i = 0; i < totalMinutes; i++) {
@@ -92,20 +99,39 @@ export function calculatePay(clockIn, clockOut, options = {}) {
     let multiplier = RATE[category];
 
     if (!shabbat && i >= standardMinutes) {
-      overtimeMinutes++;
       if (flip) {
-        multiplier *= 1.5; // single bump, see file header
+        multiplier *= 1.5;
+        otTier2Minutes++;
       } else {
         const minutesPastThreshold = i - standardMinutes;
-        multiplier *= minutesPastThreshold < DAY_OT_TIER1_MINUTES ? 1.25 : 1.5;
+        if (minutesPastThreshold < DAY_OT_TIER1_MINUTES) {
+          multiplier *= 1.25;
+          otTier1Minutes++;
+        } else {
+          multiplier *= 1.5;
+          otTier2Minutes++;
+        }
       }
+    } else if (!shabbat) {
+      regularMinutes++;
     }
+
+    const ratePercent = Math.round(multiplier * 1000) / 10; // e.g. 100, 130, 162.5
+    minutesByRatePercent[ratePercent] = (minutesByRatePercent[ratePercent] || 0) + 1;
 
     hoursByCategory[category] += 1 / 60;
     preBonusPay += multiplier * (BASE_WAGE_ILS / 60);
   }
 
-  const bonusMultiplier = options.productivityBonusEligible ? 1.1 : 1.0;
+  const hoursByRate = Object.entries(minutesByRatePercent)
+    .map(([rate, minutes]) => ({ ratePercent: Number(rate), hours: round2(minutes / 60) }))
+    .sort((a, b) => a.ratePercent - b.ratePercent);
+
+  const productivityBonusApplied = !!options.productivityBonusEligible;
+  const idfBonusPercent = options.idfBonusPercent > 0 ? options.idfBonusPercent : 0;
+  let bonusMultiplier = 1.0;
+  if (productivityBonusApplied) bonusMultiplier *= 1.1;
+  if (idfBonusPercent) bonusMultiplier *= 1 + idfBonusPercent / 100;
   const finalPay = preBonusPay * bonusMultiplier;
 
   return {
@@ -113,15 +139,20 @@ export function calculatePay(clockIn, clockOut, options = {}) {
     nightOverlapHours: round2(nightOverlapMinutes / 60),
     nightFlipTriggered: flip,
     standardHours: standardMinutes / 60,
-    overtimeHours: round2(overtimeMinutes / 60),
+    overtimeHours: round2((otTier1Minutes + otTier2Minutes) / 60),
+    regularHours: round2(regularMinutes / 60),
+    overtimeTier1Hours: round2(otTier1Minutes / 60),
+    overtimeTier2Hours: round2(otTier2Minutes / 60),
     hoursByCategory: {
       day: round2(hoursByCategory.day),
       evening: round2(hoursByCategory.evening),
       night: round2(hoursByCategory.night),
       shabbat: round2(hoursByCategory.shabbat),
     },
+    hoursByRate,
     preBonusPayILS: round2(preBonusPay),
-    productivityBonusApplied: !!options.productivityBonusEligible,
+    productivityBonusApplied,
+    idfBonusPercent,
     finalPayILS: round2(finalPay),
   };
 }

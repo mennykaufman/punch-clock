@@ -16,17 +16,30 @@
 
 <!-- LOGIN -->
 <div id="login-screen">
-  <div class="card login-card">
+  <div class="card login-card" id="google-signin-card">
     <p class="card-title">Sign in</p>
-    <label class="field-label" for="login-employee-id">Work ID</label>
-    <input class="field-input" type="text" id="login-employee-id" autocomplete="off" />
-    <label class="field-label" for="login-pin">PIN</label>
-    <input class="field-input" type="password" inputmode="numeric" id="login-pin" autocomplete="off" />
-    <label class="field-label" for="login-employment-start-date">Employment start date (first time only)</label>
-    <input class="field-input" type="date" id="login-employment-start-date" />
+    <button class="big-button" id="btn-google-signin" type="button">Sign in with Google</button>
     <p class="field-hint" id="login-error"></p>
-    <button class="big-button" id="btn-login" type="button">Continue</button>
-    <p class="field-hint">First time? Pick any Work ID and PIN — that creates your account.</p>
+  </div>
+
+  <!-- Shown once, right after the very first Google sign-in for a brand new account -->
+  <div class="card login-card" id="welcome-card" hidden>
+    <p class="card-title">Welcome! A couple of one-time questions</p>
+    <label class="field-label" for="welcome-employment-start-date">Employment start date</label>
+    <input class="field-input" type="date" id="welcome-employment-start-date" />
+    <label class="switch-row">
+      <span>Eligible for צה"ל bonus?</span>
+      <input type="checkbox" id="welcome-idf-eligible" />
+    </label>
+    <select class="field-input" id="welcome-idf-percent" hidden>
+      <option value="2">2%</option>
+      <option value="3">3%</option>
+    </select>
+    <label class="field-label" for="welcome-migrate-id">Migrating from an old Work ID? (optional)</label>
+    <input class="field-input" type="text" id="welcome-migrate-id" placeholder="Old Work ID" autocomplete="off" />
+    <input class="field-input" type="password" inputmode="numeric" id="welcome-migrate-pin" placeholder="Old PIN" autocomplete="off" />
+    <p class="field-hint" id="welcome-error"></p>
+    <button class="big-button" id="btn-welcome-continue" type="button">Continue</button>
   </div>
 </div>
 
@@ -90,6 +103,10 @@
       </label>
     </div>
     <div class="card">
+      <label class="field-label" for="monthly-hours-goal">Monthly hours goal (optional)</label>
+      <input class="field-input" type="number" min="0" id="monthly-hours-goal" placeholder="e.g. 186" />
+    </div>
+    <div class="card">
       <label class="field-label" for="theme-select">Dark Mode</label>
       <select class="field-input" id="theme-select">
         <option value="system">System Default</option>
@@ -132,6 +149,9 @@
   </div>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
 <script type="module" src="app.js"></script>
 <script>
   if ("serviceWorker" in navigator) {

@@ -1,17 +1,23 @@
 import { SHIFT_CATALOG, matchShiftByClockIn, matchShiftByActualEnd } from "./data/shifts.js";
 import { calculatePay, isProductivityBonusEligible } from "./data/payRules.js";
-import { fetchUserData, saveUserData, subscribeToUserData } from "./data/cloud.js";
+import {
+  fetchUserData,
+  saveUserData,
+  subscribeToUserData,
+  signInWithGoogle,
+  onAuthChange,
+  signOutUser,
+} from "./data/cloud.js";
 
-const SESSION_KEY = "punchclock_session_v1"; // { employeeId, pin }
-
-function defaultState(pin, employmentStartDate = "") {
+function defaultState(employmentStartDate = "", idfBonusPercent = 0) {
   return {
-    pin,
     seq: 0, // bumped on every local save so a late/out-of-order cloud snapshot can never clobber a newer local change
     settings: {
       employmentStartDate,
+      idfBonusPercent, // 0 = not eligible, else 2 or 3
       remindPointsOnClockOut: true,
-      theme: "system", // "system" | "on" | "off"
+      theme: "system", // "system" | "dark" | "light"
+      monthlyHoursGoal: 0, // 0 = no goal set
     },
     currentPunch: null, // { clockInISO, shift: {start,end,vouchers,points} }
     punches: [], // completed punches
@@ -19,43 +25,31 @@ function defaultState(pin, employmentStartDate = "") {
   };
 }
 
-function localCacheKey(employeeId) {
-  return `punchclock_state_${employeeId}`;
+function localCacheKey(uidKey) {
+  return `punchclock_state_${uidKey}`;
 }
 
-function loadLocalCache(employeeId) {
-  const raw = localStorage.getItem(localCacheKey(employeeId));
+function loadLocalCache(uidKey) {
+  const raw = localStorage.getItem(localCacheKey(uidKey));
   return raw ? JSON.parse(raw) : null;
 }
 
-function saveLocalCache(employeeId, data) {
-  localStorage.setItem(localCacheKey(employeeId), JSON.stringify(data));
+function saveLocalCache(uidKey, data) {
+  localStorage.setItem(localCacheKey(uidKey), JSON.stringify(data));
 }
 
-function getSession() {
-  const raw = localStorage.getItem(SESSION_KEY);
-  return raw ? JSON.parse(raw) : null;
-}
-
-function setSession(session) {
-  localStorage.setItem(SESSION_KEY, JSON.stringify(session));
-}
-
-function clearSession() {
-  localStorage.removeItem(SESSION_KEY);
-}
-
-let session = null; // { employeeId, pin }
+let currentUid = null; // the signed-in Google account's uid — the Firestore document key
+let currentUserLabel = ""; // email/name, for display only
 let state = null;
 let unsubscribeCloud = null;
 let applyingRemoteUpdate = false;
 
 function saveState() {
-  if (!session) return;
+  if (!currentUid) return;
   if (!applyingRemoteUpdate) state.seq = (state.seq || 0) + 1;
-  saveLocalCache(session.employeeId, state);
+  saveLocalCache(currentUid, state);
   if (!applyingRemoteUpdate) {
-    saveUserData(session.employeeId, state).catch((err) => {
+    saveUserData(currentUid, state).catch((err) => {
       console.error("cloud save failed:", err);
       // Offline: Firestore's own local cache queues this write and retries
       // automatically once the connection comes back, so nothing else to do here.
@@ -67,19 +61,42 @@ function uid() {
   return (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`);
 }
 
+// Guards against a Firestore call hanging forever (observed when logging back in shortly
+// after logging out, mid-subscription-teardown) — without this, the login button would be
+// stuck indefinitely with no way to recover short of reloading the page.
+function withTimeout(promise, ms, message) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error(message)), ms)),
+  ]);
+}
+
 // ---------- auth / session ----------
 
 const loginScreen = document.getElementById("login-screen");
 const appShell = document.getElementById("app-shell");
-const loginEmployeeId = document.getElementById("login-employee-id");
-const loginPin = document.getElementById("login-pin");
-const loginEmploymentStartDate = document.getElementById("login-employment-start-date");
 const loginError = document.getElementById("login-error");
-const btnLogin = document.getElementById("btn-login");
+const btnGoogleSignIn = document.getElementById("btn-google-signin");
+const googleSignInCard = document.getElementById("google-signin-card");
+const welcomeCard = document.getElementById("welcome-card");
+const welcomeEmploymentStartDate = document.getElementById("welcome-employment-start-date");
+const welcomeIdfEligible = document.getElementById("welcome-idf-eligible");
+const welcomeIdfPercent = document.getElementById("welcome-idf-percent");
+const welcomeMigrateId = document.getElementById("welcome-migrate-id");
+const welcomeMigratePin = document.getElementById("welcome-migrate-pin");
+const welcomeError = document.getElementById("welcome-error");
+const btnWelcomeContinue = document.getElementById("btn-welcome-continue");
 
 function showLoginScreen() {
   loginScreen.hidden = false;
   appShell.hidden = true;
+  googleSignInCard.hidden = false;
+  welcomeCard.hidden = true;
+}
+
+function showWelcomeCard() {
+  googleSignInCard.hidden = true;
+  welcomeCard.hidden = false;
 }
 
 function showAppShell() {
@@ -87,11 +104,11 @@ function showAppShell() {
   appShell.hidden = false;
 }
 
-// Subscribes to this employee's cloud document so changes made on any other
+// Subscribes to this account's cloud document so changes made on any other
 // device show up here automatically too.
-function startCloudSync(employeeId) {
+function startCloudSync(uidKey) {
   if (unsubscribeCloud) unsubscribeCloud();
-  unsubscribeCloud = subscribeToUserData(employeeId, (data) => {
+  unsubscribeCloud = subscribeToUserData(uidKey, (data) => {
     // A snapshot can arrive late/out-of-order relative to our own rapid local
     // writes (e.g. clock-in immediately followed by an edit); only accept it
     // if it isn't older than what we already have, so it can never clobber a
@@ -100,7 +117,7 @@ function startCloudSync(employeeId) {
 
     applyingRemoteUpdate = true;
     state = data;
-    saveLocalCache(employeeId, state);
+    saveLocalCache(uidKey, state);
     renderHome();
     renderHistory();
     renderCafeteria();
@@ -109,75 +126,101 @@ function startCloudSync(employeeId) {
   });
 }
 
-async function handleLogin() {
-  const employeeId = loginEmployeeId.value.trim();
-  const pin = loginPin.value.trim();
+btnGoogleSignIn.addEventListener("click", async () => {
   loginError.textContent = "";
-
-  if (!employeeId || !pin) {
-    loginError.textContent = "Enter both your Work ID and PIN.";
-    return;
-  }
-
-  btnLogin.disabled = true;
-  btnLogin.textContent = "Checking…";
+  btnGoogleSignIn.disabled = true;
+  btnGoogleSignIn.textContent = "Redirecting…";
   try {
-    const existing = await fetchUserData(employeeId);
+    await signInWithGoogle(); // navigates away to Google; the page reloads on return
+  } catch (err) {
+    console.error("google sign-in failed:", err);
+    loginError.textContent = "Couldn't start Google sign-in. Try again.";
+    btnGoogleSignIn.disabled = false;
+    btnGoogleSignIn.textContent = "Sign in with Google";
+  }
+});
 
-    if (existing) {
-      if (existing.pin !== pin) {
-        loginError.textContent = "Wrong PIN for this Work ID.";
+welcomeIdfEligible.addEventListener("change", () => {
+  welcomeIdfPercent.hidden = !welcomeIdfEligible.checked;
+});
+
+btnWelcomeContinue.addEventListener("click", async () => {
+  welcomeError.textContent = "";
+  btnWelcomeContinue.disabled = true;
+  btnWelcomeContinue.textContent = "Setting up…";
+  try {
+    const idfBonusPercent = welcomeIdfEligible.checked ? Number(welcomeIdfPercent.value) : 0;
+    const newState = defaultState(welcomeEmploymentStartDate.value, idfBonusPercent);
+
+    const migrateId = welcomeMigrateId.value.trim();
+    const migratePin = welcomeMigratePin.value.trim();
+    if (migrateId && migratePin) {
+      const oldData = await withTimeout(fetchUserData(migrateId), 10000, "timed out fetching old account");
+      if (!oldData || oldData.pin !== migratePin) {
+        welcomeError.textContent = "Couldn't find that old Work ID + PIN — check them, or leave both blank to skip.";
         return;
       }
-      state = existing;
-    } else {
-      // Employment start date only matters the first time an account is created —
-      // existing accounts keep whatever they already have, ignoring this field.
-      state = defaultState(pin, loginEmploymentStartDate.value);
-      await saveUserData(employeeId, state);
+      // Bring over the real shift/spending history; keep the fresh settings just entered above.
+      newState.punches = oldData.punches || [];
+      newState.cafeteriaSpending = oldData.cafeteriaSpending || [];
+      newState.currentPunch = oldData.currentPunch || null;
     }
 
-    session = { employeeId, pin };
-    setSession(session);
-    saveLocalCache(employeeId, state);
-    startCloudSync(employeeId);
+    await withTimeout(saveUserData(currentUid, newState), 10000, "timed out creating account");
+    state = newState;
+    saveLocalCache(currentUid, state);
+    startCloudSync(currentUid);
     showAppShell();
     renderHome();
   } catch (err) {
-    console.error("login failed:", err);
-    loginError.textContent = "Couldn't reach the server — check your internet connection and try again.";
+    console.error("welcome setup failed:", err);
+    welcomeError.textContent = "Couldn't reach the server — check your internet connection and try again.";
   } finally {
-    btnLogin.disabled = false;
-    btnLogin.textContent = "Continue";
+    btnWelcomeContinue.disabled = false;
+    btnWelcomeContinue.textContent = "Continue";
+  }
+});
+
+async function handleAuthenticatedUser(user) {
+  currentUid = user.uid;
+  currentUserLabel = user.email || user.displayName || user.uid;
+  try {
+    const existing = await withTimeout(fetchUserData(user.uid), 10000, "timed out fetching account");
+    if (existing) {
+      state = existing;
+      saveLocalCache(currentUid, state);
+      startCloudSync(currentUid);
+      showAppShell();
+      renderHome();
+    } else {
+      showWelcomeCard();
+    }
+  } catch (err) {
+    console.error("post sign-in check failed:", err);
+    loginError.textContent = "Couldn't reach the server — check your internet connection and try again.";
+    showLoginScreen();
   }
 }
-
-btnLogin.addEventListener("click", handleLogin);
 
 function handleLogout() {
   if (unsubscribeCloud) unsubscribeCloud();
   unsubscribeCloud = null;
-  clearSession();
-  session = null;
+  currentUid = null;
+  currentUserLabel = "";
   state = null;
-  loginEmployeeId.value = "";
-  loginPin.value = "";
-  loginEmploymentStartDate.value = "";
   loginError.textContent = "";
+  signOutUser().catch(() => {});
   showLoginScreen();
 }
 
 function boot() {
-  session = getSession();
-  if (!session) {
-    showLoginScreen();
-    return;
-  }
-  const cached = loadLocalCache(session.employeeId);
-  state = cached || defaultState(session.pin);
-  showAppShell();
-  renderHome();
-  startCloudSync(session.employeeId);
+  onAuthChange((user) => {
+    if (user) {
+      handleAuthenticatedUser(user);
+    } else if (!state) {
+      showLoginScreen();
+    }
+  });
 }
 
 // ---------- formatting helpers ----------
@@ -382,7 +425,10 @@ function resolveActualShift(pickedShift, clockOutDate) {
 // everything needed to save a punch record, including whether Luba points moved.
 function buildPunch(clockInDate, clockOutDate, shift, pickedShift) {
   const eligible = isProductivityBonusEligible(state.settings.employmentStartDate, clockOutDate);
-  const pay = calculatePay(clockInDate, clockOutDate, { productivityBonusEligible: eligible });
+  const pay = calculatePay(clockInDate, clockOutDate, {
+    productivityBonusEligible: eligible,
+    idfBonusPercent: state.settings.idfBonusPercent || 0,
+  });
 
   const punch = {
     id: uid(),
@@ -525,10 +571,12 @@ function openLogPointsModal() {
   saveBtn.addEventListener("click", () => {
     const pointsSpent = typeSelect.value === "manual" ? parseInt(pointsInput.value, 10) : parseInt(typeSelect.value, 10);
     if (!pointsSpent || pointsSpent <= 0) return;
+    const type = typeSelect.value === "100" ? "meat" : typeSelect.value === "50" ? "dairy" : "manual";
     const entry = {
       id: uid(),
       timestampISO: new Date().toISOString(),
       pointsSpent,
+      type,
       note: noteInput.value.trim(),
     };
     state.cafeteriaSpending.push(entry);
@@ -670,8 +718,14 @@ function applyTheme() {
 function renderSettings() {
   document.getElementById("remind-points-toggle").checked = !!state.settings.remindPointsOnClockOut;
   document.getElementById("theme-select").value = state.settings.theme || "system";
-  document.getElementById("signed-in-as").textContent = session ? `Signed in as: ${session.employeeId}` : "";
+  document.getElementById("monthly-hours-goal").value = state.settings.monthlyHoursGoal || "";
+  document.getElementById("signed-in-as").textContent = currentUid ? `Signed in as: ${currentUserLabel}` : "";
 }
+
+document.getElementById("monthly-hours-goal").addEventListener("change", (e) => {
+  state.settings.monthlyHoursGoal = Number(e.target.value) || 0;
+  saveState();
+});
 
 document.getElementById("remind-points-toggle").addEventListener("change", (e) => {
   state.settings.remindPointsOnClockOut = e.target.checked;
@@ -693,23 +747,122 @@ function toDatetimeLocalValue(date) {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
-function openMoreModal() {
-  openModal("More");
-
-  const now = new Date();
-  const weekStart = startOfWeek(now);
+function computeMoreStats(referenceDate = new Date()) {
+  const weekStart = startOfWeek(referenceDate);
   const weekPunches = state.punches.filter((p) => new Date(p.clockInISO) >= weekStart);
-  const monthPunches = state.punches.filter((p) => sameMonth(new Date(p.clockInISO), now));
+  const monthPunches = state.punches.filter((p) => sameMonth(new Date(p.clockInISO), referenceDate));
   const sum = (arr, key) => arr.reduce((s, p) => s + p[key], 0);
 
+  const weekHours = sum(weekPunches, "actualHours");
+  const weekPay = sum(weekPunches, "payILS");
+  const monthHours = sum(monthPunches, "actualHours");
+  const monthPay = sum(monthPunches, "payILS");
+  const monthShiftCount = monthPunches.length;
+
+  const monthSpending = state.cafeteriaSpending.filter((s) => sameMonth(new Date(s.timestampISO), referenceDate));
+  const spentByType = { meat: 0, dairy: 0, manual: 0 };
+  const countByType = { meat: 0, dairy: 0, manual: 0 };
+  for (const s of monthSpending) {
+    const t = s.type || "manual";
+    spentByType[t] += s.pointsSpent;
+    countByType[t] += 1;
+  }
+  const { earned, spent, balance } = monthlyBalance(referenceDate);
+
+  return {
+    weekHours, weekPay, monthHours, monthPay, monthShiftCount, monthPunches,
+    avgHoursPerShift: monthShiftCount ? monthHours / monthShiftCount : 0,
+    avgPayPerShift: monthShiftCount ? monthPay / monthShiftCount : 0,
+    avgHourlyPay: monthHours ? monthPay / monthHours : 0,
+    lubaEarned: earned, lubaSpent: spent, lubaBalance: balance,
+    spentByType, countByType,
+  };
+}
+
+// ---------- monthly attendance export (Excel / PDF) ----------
+
+function monthExportRows(monthPunches) {
+  const sorted = [...monthPunches].sort((a, b) => new Date(a.clockInISO) - new Date(b.clockInISO));
+  return sorted.map((p) => ({
+    Date: formatDate(new Date(p.clockInISO)),
+    In: formatTime(new Date(p.clockInISO)),
+    Out: `${formatDate(new Date(p.clockOutISO))} ${formatTime(new Date(p.clockOutISO))}`,
+    Hours: p.actualHours,
+    Pay: p.payILS,
+    Points: p.mealPoints,
+  }));
+}
+
+function exportMonthToXlsx(monthPunches) {
+  if (typeof XLSX === "undefined") {
+    alert("Export library didn't load — check your internet connection and try again.");
+    return;
+  }
+  const rows = monthExportRows(monthPunches);
+  const sheet = XLSX.utils.json_to_sheet(rows);
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, sheet, "Attendance");
+  const monthName = new Date().toLocaleDateString([], { year: "numeric", month: "2-digit" });
+  XLSX.writeFile(workbook, `attendance-${monthName}.xlsx`);
+}
+
+function exportMonthToPdf(monthPunches) {
+  if (typeof window.jspdf === "undefined") {
+    alert("Export library didn't load — check your internet connection and try again.");
+    return;
+  }
+  const rows = monthExportRows(monthPunches);
+  const doc = new window.jspdf.jsPDF();
+  doc.text("Monthly Attendance", 14, 14);
+  doc.autoTable({
+    startY: 20,
+    head: [["Date", "In", "Out", "Hours", "Pay", "Points"]],
+    body: rows.map((r) => [r.Date, r.In, r.Out, r.Hours, formatILS(r.Pay), r.Points]),
+  });
+  const monthName = new Date().toLocaleDateString([], { year: "numeric", month: "2-digit" });
+  doc.save(`attendance-${monthName}.pdf`);
+}
+
+function openMoreModal() {
+  openModal("More");
+  const s = computeMoreStats();
+  const goal = state.settings.monthlyHoursGoal || 0;
+
   const summary = document.createElement("div");
+  let goalLine = "";
+  if (goal > 0) {
+    const pct = Math.min(100, Math.round((s.monthHours / goal) * 100));
+    goalLine = `<p>Monthly hours goal: <strong>${pct}%</strong> of ${goal}h (${s.monthHours.toFixed(1)}h so far)</p>`;
+  }
   summary.innerHTML = `
     <p class="card-title">This week</p>
-    <p>${sum(weekPunches, "actualHours").toFixed(1)}h · ${formatILS(sum(weekPunches, "payILS"))}</p>
+    <p>${s.weekHours.toFixed(1)}h · ${formatILS(s.weekPay)}</p>
     <p class="card-title">This month</p>
-    <p>${sum(monthPunches, "actualHours").toFixed(1)}h · ${formatILS(sum(monthPunches, "payILS"))} · ${monthPunches.length} actual shifts</p>
+    <p>${s.monthHours.toFixed(1)}h · ${formatILS(s.monthPay)} · ${s.monthShiftCount} actual shifts</p>
+    ${goalLine}
+    <p class="card-title">Averages this month</p>
+    <p>${s.avgHoursPerShift.toFixed(1)}h/shift · ${formatILS(s.avgPayPerShift)}/shift · ${formatILS(s.avgHourlyPay)}/h effective</p>
+    <p class="card-title">Luba points this month</p>
+    <p>${s.lubaEarned} earned − ${s.lubaSpent} spent = ${s.lubaBalance} balance</p>
+    <p>Used: ${s.countByType.meat} בשרי (${s.spentByType.meat} pts) · ${s.countByType.dairy} חלבי (${s.spentByType.dairy} pts)${s.countByType.manual ? ` · ${s.countByType.manual} manual (${s.spentByType.manual} pts)` : ""}</p>
   `;
   modalBody.appendChild(summary);
+
+  const exportRow = document.createElement("div");
+  exportRow.style.display = "flex";
+  exportRow.style.gap = "10px";
+  const exportXlsxBtn = document.createElement("button");
+  exportXlsxBtn.className = "secondary-button";
+  exportXlsxBtn.textContent = "Export Excel";
+  exportXlsxBtn.style.marginBottom = "0";
+  exportXlsxBtn.addEventListener("click", () => exportMonthToXlsx(s.monthPunches));
+  const exportPdfBtn = document.createElement("button");
+  exportPdfBtn.className = "secondary-button";
+  exportPdfBtn.textContent = "Export PDF";
+  exportPdfBtn.style.marginBottom = "0";
+  exportPdfBtn.addEventListener("click", () => exportMonthToPdf(s.monthPunches));
+  exportRow.append(exportXlsxBtn, exportPdfBtn);
+  modalBody.appendChild(exportRow);
 
   const addBtn = document.createElement("button");
   addBtn.className = "btn-primary";
@@ -866,20 +1019,20 @@ function openPayBreakdownModal(punch) {
   openModal("Pay breakdown");
   const pay = punch.payBreakdown;
 
-  if (!pay) {
+  if (!pay || !pay.hoursByRate) {
     modalBody.innerHTML = `<p class="field-hint">Breakdown not available for this entry.</p>`;
   } else {
-    const h = pay.hoursByCategory;
-    const specialHours = (h.night + h.shabbat).toFixed(1);
+    // Only rates that actually applied to this shift show up — nothing at 0 hours.
+    const rateRows = pay.hoursByRate.map((r) => [`Hours at ${r.ratePercent}%`, `${r.hours}h`]);
     const rows = [
-      ["Regular hours", `${pay.regularHours}h`],
-      ["Overtime (125%)", `${pay.overtimeTier1Hours}h`],
-      ["Overtime (150%)", `${pay.overtimeTier2Hours}h`],
-      ["Night/Shabbat premium hours", `${specialHours}h`],
+      ...rateRows,
       ["Before bonus", formatILS(pay.preBonusPayILS)],
       ["+10% פריון bonus", pay.productivityBonusApplied ? "Applied" : "Not applied"],
-      ["Total pay for this shift", formatILS(pay.finalPayILS)],
     ];
+    if (pay.idfBonusPercent) {
+      rows.push([`+${pay.idfBonusPercent}% צה"ל bonus`, "Applied"]);
+    }
+    rows.push(["Total pay for this shift", formatILS(pay.finalPayILS)]);
     modalBody.innerHTML = rows.map(([label, value]) => `<p>${label}: <strong>${value}</strong></p>`).join("");
   }
 
