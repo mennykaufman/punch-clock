@@ -4,11 +4,12 @@ import { fetchUserData, saveUserData, subscribeToUserData } from "./data/cloud.j
 
 const SESSION_KEY = "punchclock_session_v1"; // { employeeId, pin }
 
-function defaultState(pin) {
+function defaultState(pin, employmentStartDate = "") {
   return {
     pin,
+    seq: 0, // bumped on every local save so a late/out-of-order cloud snapshot can never clobber a newer local change
     settings: {
-      employmentStartDate: "",
+      employmentStartDate,
       remindPointsOnClockOut: true,
     },
     currentPunch: null, // { clockInISO, shift: {start,end,vouchers,points} }
@@ -50,6 +51,7 @@ let applyingRemoteUpdate = false;
 
 function saveState() {
   if (!session) return;
+  if (!applyingRemoteUpdate) state.seq = (state.seq || 0) + 1;
   saveLocalCache(session.employeeId, state);
   if (!applyingRemoteUpdate) {
     saveUserData(session.employeeId, state).catch((err) => {
@@ -70,6 +72,7 @@ const loginScreen = document.getElementById("login-screen");
 const appShell = document.getElementById("app-shell");
 const loginEmployeeId = document.getElementById("login-employee-id");
 const loginPin = document.getElementById("login-pin");
+const loginEmploymentStartDate = document.getElementById("login-employment-start-date");
 const loginError = document.getElementById("login-error");
 const btnLogin = document.getElementById("btn-login");
 
@@ -88,6 +91,12 @@ function showAppShell() {
 function startCloudSync(employeeId) {
   if (unsubscribeCloud) unsubscribeCloud();
   unsubscribeCloud = subscribeToUserData(employeeId, (data) => {
+    // A snapshot can arrive late/out-of-order relative to our own rapid local
+    // writes (e.g. clock-in immediately followed by an edit); only accept it
+    // if it isn't older than what we already have, so it can never clobber a
+    // newer local change with stale data (from this device or another one).
+    if ((data.seq || 0) < (state?.seq || 0)) return;
+
     applyingRemoteUpdate = true;
     state = data;
     saveLocalCache(employeeId, state);
@@ -121,7 +130,9 @@ async function handleLogin() {
       }
       state = existing;
     } else {
-      state = defaultState(pin);
+      // Employment start date only matters the first time an account is created —
+      // existing accounts keep whatever they already have, ignoring this field.
+      state = defaultState(pin, loginEmploymentStartDate.value);
       await saveUserData(employeeId, state);
     }
 
@@ -150,6 +161,7 @@ function handleLogout() {
   state = null;
   loginEmployeeId.value = "";
   loginPin.value = "";
+  loginEmploymentStartDate.value = "";
   loginError.textContent = "";
   showLoginScreen();
 }
@@ -191,7 +203,7 @@ function startOfWeek(date) {
 // ---------- navigation ----------
 
 const SCREENS = ["home", "history", "cafeteria", "settings"];
-const TITLES = { home: "Home", history: "History", cafeteria: "Luba", settings: "Settings" };
+const TITLES = { home: "Home", history: "Monthly Attendance", cafeteria: "Luba", settings: "Settings" };
 
 function showScreen(name) {
   for (const s of SCREENS) {
@@ -251,7 +263,7 @@ function resolveShiftForClockIn(clockInDate) {
     }
 
     if (match.matched && match.candidates.length > 1) {
-      openModal(`Shift starting ${match.start} — which end time?`);
+      openModal("Which shift is this?");
       for (const shift of match.candidates) {
         const btn = document.createElement("button");
         btn.className = "modal-option";
@@ -329,14 +341,11 @@ async function handleClockIn() {
   renderHome();
 }
 
-async function handleClockOut() {
-  const clockOutDate = new Date();
-  const clockInDate = new Date(state.currentPunch.clockInISO);
-  const pickedShift = state.currentPunch.shift;
-
-  // The shift picked at clock-in fixes the start, but if the actual clock-out ran
-  // longer or shorter than expected, switch to whichever catalog row (same start)
-  // actually matches reality, so Luba points/vouchers reflect the real shift.
+// Shared by live clock-out and the manual "More" entry form: given real (or manually
+// entered) clock-in/out times and the originally picked shift, auto-corrects the shift
+// match against the actual end time and computes pay. Returns everything needed to
+// save a punch record and report whether Luba points shifted up or down as a result.
+function buildPunch(clockInDate, clockOutDate, pickedShift) {
   const betterMatch = matchShiftByActualEnd(pickedShift.start, clockOutDate);
   const shift = betterMatch || pickedShift;
 
@@ -353,23 +362,58 @@ async function handleClockOut() {
     voucherNote: shift.vouchers,
     actualHours: pay.totalHours,
     payILS: pay.finalPayILS,
+    payBreakdown: pay,
+    edited: false,
   };
+
+  const pointsDelta = shift.points - pickedShift.points;
+  return { punch, pay, pointsDelta };
+}
+
+async function handleClockOut() {
+  const clockOutDate = new Date();
+  const clockInDate = new Date(state.currentPunch.clockInISO);
+  const pickedShift = state.currentPunch.shift;
+
+  if (clockOutDate.getTime() - clockInDate.getTime() < 60000) {
+    openModal("Too soon");
+    const p = document.createElement("p");
+    p.textContent = "You just clocked in — wait at least a minute before clocking out.";
+    modalBody.appendChild(p);
+    const okBtn = document.createElement("button");
+    okBtn.className = "btn-primary";
+    okBtn.textContent = "OK";
+    okBtn.addEventListener("click", closeModal);
+    modalActions.appendChild(okBtn);
+    return;
+  }
+
+  const { punch, pay, pointsDelta } = buildPunch(clockInDate, clockOutDate, pickedShift);
 
   state.punches.push(punch);
   state.currentPunch = null;
   saveState();
   renderHome();
 
-  showClockOutSummary(punch, pay);
+  showClockOutSummary(punch, pay, pointsDelta);
 }
 
-function showClockOutSummary(punch, pay) {
+function showClockOutSummary(punch, pay, pointsDelta) {
   openModal("Shift complete");
   const body = document.createElement("div");
+
+  let adjustmentNote = "";
+  if (pointsDelta > 0) {
+    adjustmentNote = `<p class="field-hint">⚠️ Shift ran later than planned — Luba points adjusted up by ${pointsDelta}.</p>`;
+  } else if (pointsDelta < 0) {
+    adjustmentNote = `<p class="field-hint">⚠️ Shift ended earlier than planned — Luba points adjusted down by ${Math.abs(pointsDelta)}.</p>`;
+  }
+
   body.innerHTML = `
     <p><strong>${punch.actualHours}h</strong> worked (${punch.shiftLabel})</p>
     <p>Pay: <strong>${formatILS(punch.payILS)}</strong>${pay.productivityBonusApplied ? " (incl. +10% פריון)" : ""}</p>
     <p>Luba points earned: <strong>${punch.mealPoints}</strong> (${punch.voucherNote})</p>
+    ${adjustmentNote}
   `;
   modalBody.appendChild(body);
 
@@ -413,24 +457,40 @@ function promptLogPointsUsed() {
 function openLogPointsModal() {
   openModal("Log points used");
 
+  const typeLabel = document.createElement("label");
+  typeLabel.className = "field-label";
+  typeLabel.textContent = "What was used?";
+  const typeSelect = document.createElement("select");
+  typeSelect.className = "field-input";
+  typeSelect.innerHTML = `
+    <option value="100">בשרי (100 נקודות)</option>
+    <option value="50">חלבי (50 נקודות)</option>
+    <option value="manual">Manual amount</option>
+  `;
+
   const pointsInput = document.createElement("input");
   pointsInput.className = "field-input";
   pointsInput.type = "number";
   pointsInput.min = "0";
   pointsInput.placeholder = "Points spent";
-  modalBody.appendChild(pointsInput);
+  pointsInput.hidden = true;
+
+  typeSelect.addEventListener("change", () => {
+    pointsInput.hidden = typeSelect.value !== "manual";
+  });
 
   const noteInput = document.createElement("input");
   noteInput.className = "field-input";
   noteInput.type = "text";
   noteInput.placeholder = "Note (optional)";
-  modalBody.appendChild(noteInput);
+
+  modalBody.append(typeLabel, typeSelect, pointsInput, noteInput);
 
   const saveBtn = document.createElement("button");
   saveBtn.className = "btn-primary";
   saveBtn.textContent = "Save";
-  saveBtn.addEventListener("click", async () => {
-    const pointsSpent = parseInt(pointsInput.value, 10);
+  saveBtn.addEventListener("click", () => {
+    const pointsSpent = typeSelect.value === "manual" ? parseInt(pointsInput.value, 10) : parseInt(typeSelect.value, 10);
     if (!pointsSpent || pointsSpent <= 0) return;
     const entry = {
       id: uid(),
@@ -499,7 +559,7 @@ function renderHome() {
   document.getElementById("home-points-sub").textContent = `${earned} earned − ${spent} spent this month`;
 }
 
-// ---------- render: history ----------
+// ---------- render: history (Monthly Attendance) ----------
 
 function renderHistory() {
   const now = new Date();
@@ -514,26 +574,46 @@ function renderHistory() {
   document.getElementById("month-hours").textContent = `${sum(monthPunches, "actualHours").toFixed(1)}h`;
   document.getElementById("month-pay").textContent = formatILS(sum(monthPunches, "payILS"));
 
-  const list = document.getElementById("history-list");
-  list.innerHTML = "";
-  const sorted = [...state.punches].sort((a, b) => new Date(b.clockInISO) - new Date(a.clockInISO));
+  const tbody = document.getElementById("history-table-body");
+  tbody.innerHTML = "";
+
+  const sorted = [...state.punches].sort((a, b) => new Date(a.clockInISO) - new Date(b.clockInISO));
 
   if (!sorted.length) {
-    list.innerHTML = `<li class="list-empty">No shifts logged yet</li>`;
+    tbody.innerHTML = `<tr><td colspan="9" class="list-empty">No shifts logged yet</td></tr>`;
     return;
   }
 
+  let runningHours = 0;
+  let runningPay = 0;
   for (const p of sorted) {
-    const li = document.createElement("li");
-    li.className = "list-item";
-    li.innerHTML = `
-      <p class="list-item-title">${formatDate(new Date(p.clockInISO))} · ${p.shiftLabel}</p>
-      <div class="list-item-row"><span>${p.actualHours}h worked</span><span>${formatILS(p.payILS)}</span></div>
-      <div class="list-item-row list-item-sub"><span>${p.voucherNote}</span><span>${p.mealPoints} pts</span></div>
+    runningHours += p.actualHours;
+    runningPay += p.payILS;
+    const tr = document.createElement("tr");
+    if (p.edited) tr.classList.add("row-edited");
+    tr.innerHTML = `
+      <td>${formatDate(new Date(p.clockInISO))}</td>
+      <td>${formatTime(new Date(p.clockInISO))}</td>
+      <td>${formatTime(new Date(p.clockOutISO))}</td>
+      <td>${p.actualHours}h</td>
+      <td class="pay-cell" data-punch-id="${p.id}">${formatILS(p.payILS)}</td>
+      <td>${p.mealPoints}</td>
+      <td>${runningHours.toFixed(1)}h</td>
+      <td>${formatILS(runningPay)}</td>
+      <td><button class="edit-btn" type="button" data-punch-id="${p.id}">Edit</button></td>
     `;
-    list.appendChild(li);
+    tbody.appendChild(tr);
   }
 }
+
+document.getElementById("history-table-body").addEventListener("click", (e) => {
+  const punchId = e.target.dataset.punchId;
+  if (!punchId) return;
+  const punch = state.punches.find((p) => p.id === punchId);
+  if (!punch) return;
+  if (e.target.classList.contains("edit-btn")) openEditPunchModal(punch);
+  if (e.target.classList.contains("pay-cell")) openPayBreakdownModal(punch);
+});
 
 // ---------- render: cafeteria ----------
 
@@ -566,27 +646,9 @@ function renderCafeteria() {
 // ---------- render: settings ----------
 
 function renderSettings() {
-  document.getElementById("employment-start-date").value = state.settings.employmentStartDate || "";
   document.getElementById("remind-points-toggle").checked = !!state.settings.remindPointsOnClockOut;
-
-  const hint = document.getElementById("bonus-eligibility-hint");
-  if (!state.settings.employmentStartDate) {
-    hint.textContent = "Set your start date to auto-apply the 10% פריון bonus after 3 months.";
-  } else {
-    const eligible = isProductivityBonusEligible(state.settings.employmentStartDate);
-    hint.textContent = eligible
-      ? "Eligible for the 10% פריון bonus ✓"
-      : "Not yet eligible — applies automatically 3 months after your start date.";
-  }
-
   document.getElementById("signed-in-as").textContent = session ? `Signed in as: ${session.employeeId}` : "";
 }
-
-document.getElementById("employment-start-date").addEventListener("change", (e) => {
-  state.settings.employmentStartDate = e.target.value;
-  saveState();
-  renderSettings();
-});
 
 document.getElementById("remind-points-toggle").addEventListener("change", (e) => {
   state.settings.remindPointsOnClockOut = e.target.checked;
@@ -595,50 +657,158 @@ document.getElementById("remind-points-toggle").addEventListener("change", (e) =
 
 document.getElementById("btn-logout").addEventListener("click", handleLogout);
 
-// ---------- render: more (full punch log) ----------
+// ---------- manual shift entry ("More" on Monthly Attendance) ----------
 
-function renderMoreLog() {
-  const tbody = document.getElementById("more-log-body");
-  tbody.innerHTML = "";
+function toDatetimeLocalValue(date) {
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
 
-  const sorted = [...state.punches].sort((a, b) => new Date(a.clockInISO) - new Date(b.clockInISO));
+function openManualEntryModal() {
+  openModal("Add shift manually");
 
-  if (!sorted.length) {
-    tbody.innerHTML = `<tr><td colspan="8" class="list-empty">No shifts logged yet</td></tr>`;
-    return;
-  }
+  const inLabel = document.createElement("label");
+  inLabel.className = "field-label";
+  inLabel.textContent = "Clock in";
+  const inInput = document.createElement("input");
+  inInput.className = "field-input";
+  inInput.type = "datetime-local";
 
-  let runningHours = 0;
-  let runningPay = 0;
-  for (const p of sorted) {
-    runningHours += p.actualHours;
-    runningPay += p.payILS;
-    const tr = document.createElement("tr");
-    tr.innerHTML = `
-      <td>${formatDate(new Date(p.clockInISO))}</td>
-      <td>${formatTime(new Date(p.clockInISO))}</td>
-      <td>${formatTime(new Date(p.clockOutISO))}</td>
-      <td>${p.actualHours}h</td>
-      <td>${formatILS(p.payILS)}</td>
-      <td>${p.mealPoints}</td>
-      <td>${runningHours.toFixed(1)}h</td>
-      <td>${formatILS(runningPay)}</td>
+  const outLabel = document.createElement("label");
+  outLabel.className = "field-label";
+  outLabel.textContent = "Clock out";
+  const outInput = document.createElement("input");
+  outInput.className = "field-input";
+  outInput.type = "datetime-local";
+
+  const errorP = document.createElement("p");
+  errorP.className = "field-hint";
+
+  modalBody.append(inLabel, inInput, outLabel, outInput, errorP);
+
+  const saveBtn = document.createElement("button");
+  saveBtn.className = "btn-primary";
+  saveBtn.textContent = "Continue";
+  saveBtn.addEventListener("click", async () => {
+    if (!inInput.value || !outInput.value) {
+      errorP.textContent = "Enter both clock-in and clock-out.";
+      return;
+    }
+    const clockInDate = new Date(inInput.value);
+    const clockOutDate = new Date(outInput.value);
+    if (clockOutDate <= clockInDate) {
+      errorP.textContent = "Clock out must be after clock in.";
+      return;
+    }
+
+    closeModal();
+    const shift = await resolveShiftForClockIn(clockInDate);
+    if (!shift) return; // user cancelled the shift picker
+
+    const { punch } = buildPunch(clockInDate, clockOutDate, shift);
+    state.punches.push(punch);
+    saveState();
+    renderHistory();
+    renderHome();
+  });
+
+  const cancelBtn = document.createElement("button");
+  cancelBtn.className = "btn-plain";
+  cancelBtn.textContent = "Cancel";
+  cancelBtn.addEventListener("click", closeModal);
+
+  modalActions.append(cancelBtn, saveBtn);
+}
+
+document.getElementById("btn-open-more").addEventListener("click", openManualEntryModal);
+
+// ---------- edit an existing punch ----------
+
+function openEditPunchModal(punch) {
+  openModal("Edit shift");
+
+  const inLabel = document.createElement("label");
+  inLabel.className = "field-label";
+  inLabel.textContent = "Clock in";
+  const inInput = document.createElement("input");
+  inInput.className = "field-input";
+  inInput.type = "datetime-local";
+  inInput.value = toDatetimeLocalValue(new Date(punch.clockInISO));
+
+  const outLabel = document.createElement("label");
+  outLabel.className = "field-label";
+  outLabel.textContent = "Clock out";
+  const outInput = document.createElement("input");
+  outInput.className = "field-input";
+  outInput.type = "datetime-local";
+  outInput.value = toDatetimeLocalValue(new Date(punch.clockOutISO));
+
+  const errorP = document.createElement("p");
+  errorP.className = "field-hint";
+
+  modalBody.append(inLabel, inInput, outLabel, outInput, errorP);
+
+  const saveBtn = document.createElement("button");
+  saveBtn.className = "btn-primary";
+  saveBtn.textContent = "Save";
+  saveBtn.addEventListener("click", () => {
+    if (!inInput.value || !outInput.value) {
+      errorP.textContent = "Enter both clock-in and clock-out.";
+      return;
+    }
+    const clockInDate = new Date(inInput.value);
+    const clockOutDate = new Date(outInput.value);
+    if (clockOutDate <= clockInDate) {
+      errorP.textContent = "Clock out must be after clock in.";
+      return;
+    }
+
+    // Keep the shift's original start fixed (same eligibility rule as everywhere else);
+    // only the actual end gets re-matched against the edited clock-out time.
+    const [originalStart, originalEnd] = punch.shiftLabel.split("-");
+    const pseudoShift = { start: originalStart, end: originalEnd, points: punch.mealPoints, vouchers: punch.voucherNote };
+    const { punch: recalculated } = buildPunch(clockInDate, clockOutDate, pseudoShift);
+
+    Object.assign(punch, recalculated, { id: punch.id, edited: true });
+    saveState();
+    closeModal();
+    renderHistory();
+    renderHome();
+  });
+
+  const cancelBtn = document.createElement("button");
+  cancelBtn.className = "btn-plain";
+  cancelBtn.textContent = "Cancel";
+  cancelBtn.addEventListener("click", closeModal);
+
+  modalActions.append(cancelBtn, saveBtn);
+}
+
+// ---------- pay breakdown ----------
+
+function openPayBreakdownModal(punch) {
+  openModal("Pay breakdown");
+  const pay = punch.payBreakdown;
+
+  if (!pay) {
+    modalBody.innerHTML = `<p class="field-hint">Breakdown not available for this entry.</p>`;
+  } else {
+    const h = pay.hoursByCategory;
+    modalBody.innerHTML = `
+      <p>Day: <strong>${h.day}h</strong> · Evening: <strong>${h.evening}h</strong> · Night: <strong>${h.night}h</strong> · Shabbat: <strong>${h.shabbat}h</strong></p>
+      <p>Overtime hours: <strong>${pay.overtimeHours}h</strong>${pay.nightFlipTriggered ? " (night-rate shift)" : ""}</p>
+      <p>Before bonus: <strong>${formatILS(pay.preBonusPayILS)}</strong></p>
+      <p>+10% פריון bonus: <strong>${pay.productivityBonusApplied ? "Applied" : "Not applied"}</strong></p>
+      <p>Final pay: <strong>${formatILS(pay.finalPayILS)}</strong></p>
     `;
-    tbody.appendChild(tr);
   }
-}
 
-function openMoreScreen() {
-  for (const s of SCREENS) {
-    document.getElementById(`screen-${s}`).hidden = true;
-  }
-  document.getElementById("screen-more").hidden = false;
-  document.getElementById("topbar-title").textContent = "More";
-  renderMoreLog();
+  const closeBtn = document.createElement("button");
+  closeBtn.className = "btn-primary";
+  closeBtn.textContent = "Close";
+  closeBtn.addEventListener("click", closeModal);
+  modalActions.appendChild(closeBtn);
 }
-
-document.getElementById("btn-open-more").addEventListener("click", openMoreScreen);
-document.getElementById("btn-more-back").addEventListener("click", () => showScreen("settings"));
 
 // ---------- init ----------
 

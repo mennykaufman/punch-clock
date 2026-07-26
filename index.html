@@ -22,6 +22,8 @@
     <input class="field-input" type="text" id="login-employee-id" autocomplete="off" />
     <label class="field-label" for="login-pin">PIN</label>
     <input class="field-input" type="password" inputmode="numeric" id="login-pin" autocomplete="off" />
+    <label class="field-label" for="login-employment-start-date">Employment start date (first time only)</label>
+    <input class="field-input" type="date" id="login-employment-start-date" />
     <p class="field-hint" id="login-error"></p>
     <button class="big-button" id="btn-login" type="button">Continue</button>
     <p class="field-hint">First time? Pick any Work ID and PIN — that creates your account.</p>
@@ -51,7 +53,7 @@
     </div>
   </section>
 
-  <!-- HISTORY -->
+  <!-- MONTHLY ATTENDANCE (formerly History) -->
   <section class="screen" id="screen-history" data-screen hidden>
     <div class="card totals-card">
       <div class="totals-row">
@@ -67,7 +69,25 @@
         </div>
       </div>
     </div>
-    <ul class="list" id="history-list"></ul>
+    <button class="secondary-button" id="btn-open-more" type="button">More — add shift manually</button>
+    <div class="table-scroll">
+      <table class="log-table">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>In</th>
+            <th>Out</th>
+            <th>Hours</th>
+            <th>Pay</th>
+            <th>Points</th>
+            <th>Total Hours</th>
+            <th>Total Pay</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="history-table-body"></tbody>
+      </table>
+    </div>
   </section>
 
   <!-- CAFETERIA -->
@@ -84,11 +104,6 @@
   <!-- SETTINGS -->
   <section class="screen" id="screen-settings" data-screen hidden>
     <div class="card">
-      <label class="field-label" for="employment-start-date">Employment start date</label>
-      <input class="field-input" type="date" id="employment-start-date" />
-      <p class="field-hint" id="bonus-eligibility-hint"></p>
-    </div>
-    <div class="card">
       <label class="switch-row">
         <span>Remind me to log Luba points on clock-out</span>
         <input type="checkbox" id="remind-points-toggle" />
@@ -99,29 +114,6 @@
       <p class="field-hint" id="signed-in-as"></p>
       <button class="secondary-button" id="btn-logout" type="button">Switch user / Log out</button>
     </div>
-    <button class="secondary-button" id="btn-open-more" type="button">More — full punch log</button>
-  </section>
-
-  <!-- MORE (detailed spreadsheet-style log, reached from Settings) -->
-  <section class="screen" id="screen-more" hidden>
-    <button class="secondary-button" id="btn-more-back" type="button">← Back to Settings</button>
-    <div class="table-scroll">
-      <table class="log-table">
-        <thead>
-          <tr>
-            <th>Date</th>
-            <th>In</th>
-            <th>Out</th>
-            <th>Hours</th>
-            <th>Pay</th>
-            <th>Points</th>
-            <th>Total Hours</th>
-            <th>Total Pay</th>
-          </tr>
-        </thead>
-        <tbody id="more-log-body"></tbody>
-      </table>
-    </div>
   </section>
 
 </main>
@@ -131,7 +123,7 @@
     <span class="nav-icon">🏠</span><span>Home</span>
   </button>
   <button class="nav-btn" data-nav="history" type="button">
-    <span class="nav-icon">📋</span><span>History</span>
+    <span class="nav-icon">📋</span><span>Attendance</span>
   </button>
   <button class="nav-btn" data-nav="cafeteria" type="button">
     <img class="nav-icon" src="icons/luba-icon.png" alt="" /><span>Luba</span>

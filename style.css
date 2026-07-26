@@ -183,6 +183,25 @@ body {
   border-bottom: 1px solid var(--border);
 }
 
+.log-table tr.row-edited td {
+  color: var(--danger);
+}
+
+.log-table .pay-cell {
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+}
+
+.log-table .edit-btn {
+  border: none;
+  background: none;
+  color: var(--accent);
+  font-size: 13px;
+  cursor: pointer;
+  padding: 2px 6px;
+}
+
 .log-table th {
   background: var(--surface);
   color: var(--text-muted);
