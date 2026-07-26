@@ -129,12 +129,16 @@ function startCloudSync(uidKey) {
 btnGoogleSignIn.addEventListener("click", async () => {
   loginError.textContent = "";
   btnGoogleSignIn.disabled = true;
-  btnGoogleSignIn.textContent = "Redirecting…";
+  btnGoogleSignIn.textContent = "Signing in…";
   try {
-    await signInWithGoogle(); // navigates away to Google; the page reloads on return
+    const user = await signInWithGoogle(); // opens a popup; resolves once the user picks an account
+    await handleAuthenticatedUser(user);
   } catch (err) {
     console.error("google sign-in failed:", err);
-    loginError.textContent = "Couldn't start Google sign-in. Try again.";
+    loginError.textContent = err?.code === "auth/popup-closed-by-user"
+      ? "Sign-in was closed before finishing — try again."
+      : "Couldn't sign in with Google. Try again.";
+  } finally {
     btnGoogleSignIn.disabled = false;
     btnGoogleSignIn.textContent = "Sign in with Google";
   }
