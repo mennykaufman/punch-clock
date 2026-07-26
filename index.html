@@ -55,34 +55,14 @@
 
   <!-- MONTHLY ATTENDANCE (formerly History) -->
   <section class="screen" id="screen-history" data-screen hidden>
-    <div class="card totals-card">
-      <div class="totals-row">
-        <div>
-          <p class="totals-label">This week</p>
-          <p class="totals-value" id="week-hours">0h</p>
-          <p class="totals-sub" id="week-pay">₪0</p>
-        </div>
-        <div>
-          <p class="totals-label">This month</p>
-          <p class="totals-value" id="month-hours">0h</p>
-          <p class="totals-sub" id="month-pay">₪0</p>
-        </div>
-      </div>
-    </div>
-    <button class="secondary-button" id="btn-open-more" type="button">More — add shift manually</button>
+    <button class="secondary-button" id="btn-open-more" type="button">More</button>
     <div class="table-scroll">
       <table class="log-table">
         <thead>
           <tr>
-            <th>Date</th>
             <th>In</th>
             <th>Out</th>
             <th>Hours</th>
-            <th>Pay</th>
-            <th>Points</th>
-            <th>Total Hours</th>
-            <th>Total Pay</th>
-            <th></th>
           </tr>
         </thead>
         <tbody id="history-table-body"></tbody>
@@ -108,6 +88,14 @@
         <span>Remind me to log Luba points on clock-out</span>
         <input type="checkbox" id="remind-points-toggle" />
       </label>
+    </div>
+    <div class="card">
+      <label class="field-label" for="theme-select">Dark Mode</label>
+      <select class="field-input" id="theme-select">
+        <option value="system">System Default</option>
+        <option value="dark">On</option>
+        <option value="light">Off</option>
+      </select>
     </div>
     <div class="card">
       <p class="card-title">Account</p>

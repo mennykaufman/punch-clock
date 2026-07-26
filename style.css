@@ -25,6 +25,31 @@
   }
 }
 
+/* Explicit user choice (Settings > Dark Mode) always wins over the system default above. */
+:root[data-theme="light"] {
+  --bg: #f4f5f7;
+  --surface: #ffffff;
+  --text: #171923;
+  --text-muted: #6b7280;
+  --accent: #2563eb;
+  --accent-text: #ffffff;
+  --danger: #dc2626;
+  --border: #e5e7eb;
+  --nav-bg: #ffffff;
+}
+
+:root[data-theme="dark"] {
+  --bg: #111318;
+  --surface: #1c1f26;
+  --text: #f2f3f5;
+  --text-muted: #9aa1ac;
+  --accent: #3b82f6;
+  --accent-text: #ffffff;
+  --danger: #f87171;
+  --border: #2a2e37;
+  --nav-bg: #1c1f26;
+}
+
 * { box-sizing: border-box; }
 
 html, body {
@@ -183,23 +208,27 @@ body {
   border-bottom: 1px solid var(--border);
 }
 
-.log-table tr.row-edited td {
+.log-table td.cell-edited {
   color: var(--danger);
 }
 
-.log-table .pay-cell {
+.log-table tbody tr {
   cursor: pointer;
-  text-decoration: underline;
-  text-decoration-style: dotted;
 }
 
-.log-table .edit-btn {
+.log-table tbody tr:active {
+  background: var(--bg);
+}
+
+.breakdown-link {
   border: none;
   background: none;
   color: var(--accent);
-  font-size: 13px;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  font-size: 14px;
   cursor: pointer;
-  padding: 2px 6px;
+  padding: 0;
 }
 
 .log-table th {
