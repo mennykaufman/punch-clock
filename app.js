@@ -257,7 +257,7 @@ function startOfWeek(date) {
 // ---------- navigation ----------
 
 const SCREENS = ["home", "history", "cafeteria", "settings"];
-const TITLES = { home: "Home", history: "Monthly Attendance", cafeteria: "Luba", settings: "Settings" };
+const TITLES = { home: "TrackO'clock", history: "Monthly Attendance", cafeteria: "Luba", settings: "Settings" };
 
 function showScreen(name) {
   for (const s of SCREENS) {
@@ -267,6 +267,7 @@ function showScreen(name) {
     btn.classList.toggle("active", btn.dataset.nav === name);
   });
   document.getElementById("topbar-title").textContent = TITLES[name];
+  document.getElementById("topbar-subtitle").hidden = name !== "home";
   if (name === "history") renderHistory();
   if (name === "cafeteria") renderCafeteria();
   if (name === "settings") renderSettings();
