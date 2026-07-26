@@ -157,3 +157,28 @@ export function matchShiftByClockIn(clockInDate, maxDistanceMinutes = 60) {
   const candidates = SHIFT_CATALOG.filter((s) => s.start === best);
   return { matched: true, start: best, candidates };
 }
+
+// Given the shift's start (already fixed at clock-in) and the ACTUAL clock-out time,
+// find the catalog row (sharing that start) whose end best matches reality — so a
+// shift that ran longer or shorter than originally picked still gets the right
+// points/vouchers. Returns null if nothing reasonably close is found (keep the
+// originally picked row in that case).
+export function matchShiftByActualEnd(start, clockOutDate, maxDistanceMinutes = 90) {
+  const actualMinutes = clockOutDate.getHours() * 60 + clockOutDate.getMinutes();
+  const candidates = SHIFT_CATALOG.filter((s) => s.start === start);
+
+  let best = null;
+  let bestDist = Infinity;
+  for (const c of candidates) {
+    const endMinutes = toMinutes(c.end);
+    let dist = Math.abs(endMinutes - actualMinutes);
+    dist = Math.min(dist, 1440 - dist); // wrap around midnight
+    if (dist < bestDist) {
+      bestDist = dist;
+      best = c;
+    }
+  }
+
+  if (best === null || bestDist > maxDistanceMinutes) return null;
+  return best;
+}

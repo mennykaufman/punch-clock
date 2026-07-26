@@ -1,4 +1,4 @@
-import { SHIFT_CATALOG, matchShiftByClockIn } from "./data/shifts.js";
+import { SHIFT_CATALOG, matchShiftByClockIn, matchShiftByActualEnd } from "./data/shifts.js";
 import { calculatePay, isProductivityBonusEligible } from "./data/payRules.js";
 import { fetchUserData, saveUserData, subscribeToUserData } from "./data/cloud.js";
 
@@ -332,7 +332,13 @@ async function handleClockIn() {
 async function handleClockOut() {
   const clockOutDate = new Date();
   const clockInDate = new Date(state.currentPunch.clockInISO);
-  const shift = state.currentPunch.shift;
+  const pickedShift = state.currentPunch.shift;
+
+  // The shift picked at clock-in fixes the start, but if the actual clock-out ran
+  // longer or shorter than expected, switch to whichever catalog row (same start)
+  // actually matches reality, so Luba points/vouchers reflect the real shift.
+  const betterMatch = matchShiftByActualEnd(pickedShift.start, clockOutDate);
+  const shift = betterMatch || pickedShift;
 
   const eligible = isProductivityBonusEligible(state.settings.employmentStartDate, clockOutDate);
   const pay = calculatePay(clockInDate, clockOutDate, { productivityBonusEligible: eligible });
