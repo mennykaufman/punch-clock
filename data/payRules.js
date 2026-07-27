@@ -65,8 +65,9 @@ export function isProductivityBonusEligible(employmentStartDate, today = new Dat
 }
 
 // clockIn/clockOut: real Date objects captured at the moment of punching (clockOut > clockIn).
-// options: { productivityBonusEligible: boolean, idfBonusPercent: 0|2|3 }
+// options: { productivityBonusEligible: boolean, idfBonusPercent: 0|2|3, baseWageILS?: number }
 export function calculatePay(clockIn, clockOut, options = {}) {
+  const wage = options.baseWageILS > 0 ? options.baseWageILS : BASE_WAGE_ILS;
   const totalMinutes = Math.round((clockOut.getTime() - clockIn.getTime()) / 60000);
   if (totalMinutes <= 0) {
     throw new Error("clockOut must be after clockIn");
@@ -120,7 +121,7 @@ export function calculatePay(clockIn, clockOut, options = {}) {
     minutesByRatePercent[ratePercent] = (minutesByRatePercent[ratePercent] || 0) + 1;
 
     hoursByCategory[category] += 1 / 60;
-    preBonusPay += multiplier * (BASE_WAGE_ILS / 60);
+    preBonusPay += multiplier * (wage / 60);
   }
 
   const hoursByRate = Object.entries(minutesByRatePercent)
@@ -150,6 +151,7 @@ export function calculatePay(clockIn, clockOut, options = {}) {
       shabbat: round2(hoursByCategory.shabbat),
     },
     hoursByRate,
+    baseWageILS: wage,
     preBonusPayILS: round2(preBonusPay),
     productivityBonusApplied,
     idfBonusPercent,

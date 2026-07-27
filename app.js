@@ -15,6 +15,7 @@ function defaultState(employmentStartDate = "", idfBonusPercent = 0) {
     settings: {
       employmentStartDate,
       idfBonusPercent, // 0 = not eligible, else 2 or 3
+      baseWageILS: BASE_WAGE_ILS,
       remindPointsOnClockOut: true,
       theme: "system", // "system" | "dark" | "light"
       monthlyHoursGoal: 0, // 0 = no goal set
@@ -439,6 +440,7 @@ function buildPunch(clockInDate, clockOutDate, shift, pickedShift) {
   const pay = calculatePay(clockInDate, clockOutDate, {
     productivityBonusEligible: eligible,
     idfBonusPercent: state.settings.idfBonusPercent || 0,
+    baseWageILS: state.settings.baseWageILS || BASE_WAGE_ILS,
   });
 
   const punch = {
@@ -640,11 +642,13 @@ function renderHome() {
     statusSub.textContent = `Shift: ${state.currentPunch.shift.start}-${state.currentPunch.shift.end}`;
     clockBtn.textContent = "Clock Out";
     clockBtn.classList.add("is-clockedin");
+    statusLabel.classList.remove("is-inactive");
   } else {
     statusLabel.textContent = "Not clocked in";
     statusSub.textContent = "";
     clockBtn.textContent = "Clock In";
     clockBtn.classList.remove("is-clockedin");
+    statusLabel.classList.add("is-inactive");
   }
 
   const { balance, earned, spent } = monthlyBalance();
@@ -746,6 +750,7 @@ function applyTheme() {
 }
 
 function renderSettings() {
+  document.getElementById("settings-base-wage").value = state.settings.baseWageILS || BASE_WAGE_ILS;
   document.getElementById("remind-points-toggle").checked = !!state.settings.remindPointsOnClockOut;
   document.getElementById("theme-select").value = state.settings.theme || "system";
   document.getElementById("monthly-hours-goal").value = state.settings.monthlyHoursGoal || "";
@@ -780,6 +785,13 @@ for (const key of ["hours", "shifts", "pay", "averages", "luba", "export"]) {
     saveState();
   });
 }
+
+document.getElementById("settings-base-wage").addEventListener("change", (e) => {
+  const value = Number(e.target.value);
+  state.settings.baseWageILS = value > 0 ? value : BASE_WAGE_ILS;
+  saveState();
+  renderSettings();
+});
 
 document.getElementById("settings-employment-start-date").addEventListener("change", (e) => {
   state.settings.employmentStartDate = e.target.value;
@@ -1169,7 +1181,8 @@ function round2(n) {
 // each bonus. Bonuses are unwound in the same order calculatePay applies them
 // (base -> +10% פריון -> +IDF%) so each bonus's own ILS contribution is isolated.
 function computeMonthlyPayBreakdown(monthPunches) {
-  const rateHours = {};
+  const rateBuckets = {}; // ratePercent -> { hours, amountILS } — amount uses each punch's OWN wage at
+                           // the time it was worked, so a later wage change never distorts past months.
   let totalPreBonus = 0;
   let totalProductivityAmount = 0;
   let totalIdfAmount = 0;
@@ -1181,8 +1194,11 @@ function computeMonthlyPayBreakdown(monthPunches) {
     const pay = p.payBreakdown;
     if (!pay || !pay.hoursByRate) continue; // older entries predating this breakdown format
 
+    const wage = pay.baseWageILS > 0 ? pay.baseWageILS : BASE_WAGE_ILS;
     for (const r of pay.hoursByRate) {
-      rateHours[r.ratePercent] = (rateHours[r.ratePercent] || 0) + r.hours;
+      if (!rateBuckets[r.ratePercent]) rateBuckets[r.ratePercent] = { hours: 0, amountILS: 0 };
+      rateBuckets[r.ratePercent].hours += r.hours;
+      rateBuckets[r.ratePercent].amountILS += r.hours * wage * (r.ratePercent / 100);
     }
 
     const base = pay.preBonusPayILS;
@@ -1197,11 +1213,11 @@ function computeMonthlyPayBreakdown(monthPunches) {
     if (pay.idfBonusPercent) idfPercentsUsed.add(pay.idfBonusPercent);
   }
 
-  const hoursByRate = Object.entries(rateHours)
-    .map(([rate, hours]) => ({
+  const hoursByRate = Object.entries(rateBuckets)
+    .map(([rate, v]) => ({
       ratePercent: Number(rate),
-      hours: round2(hours),
-      amountILS: round2(hours * BASE_WAGE_ILS * (Number(rate) / 100)),
+      hours: round2(v.hours),
+      amountILS: round2(v.amountILS),
     }))
     .sort((a, b) => a.ratePercent - b.ratePercent);
 

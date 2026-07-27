@@ -1,53 +1,93 @@
+/* ==========================================
+   TrackO'clock Theme System (Light & Dark)
+   ========================================== */
+
 :root {
-  --bg: #f4f5f7;
-  --surface: #ffffff;
-  --text: #171923;
-  --text-muted: #6b7280;
-  --accent: #2563eb;
-  --accent-text: #ffffff;
+  --bg-main: #F8FAFC;
+  --card-bg: #FFFFFF;
+  --card-border: rgba(226, 232, 240, 0.8);
+  --card-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+
+  --text-primary: #0F172A;
+  --text-secondary: #64748B;
+
+  --btn-primary-bg: #0284C7;
+  --btn-primary-text: #FFFFFF;
+  --btn-shadow: 0 4px 14px rgba(2, 132, 199, 0.3);
+
+  --accent-cyan: #0284C7;
+  --accent-gold: #D97706;
+  --status-inactive: #64748B;
+
   --danger: #dc2626;
-  --border: #e5e7eb;
-  --nav-bg: #ffffff;
+  --nav-bg: #FFFFFF;
   color-scheme: light dark;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #111318;
-    --surface: #1c1f26;
-    --text: #f2f3f5;
-    --text-muted: #9aa1ac;
-    --accent: #3b82f6;
-    --accent-text: #ffffff;
+    --bg-main: #0B0F19;
+    --card-bg: #1E293B;
+    --card-border: rgba(255, 255, 255, 0.05);
+    --card-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+
+    --text-primary: #F8FAFC;
+    --text-secondary: #94A3B8;
+
+    --btn-primary-bg: #00F2FE;
+    --btn-primary-text: #0B0F19;
+    --btn-shadow: 0 4px 20px rgba(0, 242, 254, 0.25);
+
+    --accent-cyan: #00F2FE;
+    --accent-gold: #F59E0B;
+    --status-inactive: #94A3B8;
+
     --danger: #f87171;
-    --border: #2a2e37;
-    --nav-bg: #1c1f26;
+    --nav-bg: #1E293B;
   }
 }
 
 /* Explicit user choice (Settings > Dark Mode) always wins over the system default above. */
 :root[data-theme="light"] {
-  --bg: #f4f5f7;
-  --surface: #ffffff;
-  --text: #171923;
-  --text-muted: #6b7280;
-  --accent: #2563eb;
-  --accent-text: #ffffff;
+  --bg-main: #F8FAFC;
+  --card-bg: #FFFFFF;
+  --card-border: rgba(226, 232, 240, 0.8);
+  --card-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+
+  --text-primary: #0F172A;
+  --text-secondary: #64748B;
+
+  --btn-primary-bg: #0284C7;
+  --btn-primary-text: #FFFFFF;
+  --btn-shadow: 0 4px 14px rgba(2, 132, 199, 0.3);
+
+  --accent-cyan: #0284C7;
+  --accent-gold: #D97706;
+  --status-inactive: #64748B;
+
   --danger: #dc2626;
-  --border: #e5e7eb;
-  --nav-bg: #ffffff;
+  --nav-bg: #FFFFFF;
 }
 
 :root[data-theme="dark"] {
-  --bg: #111318;
-  --surface: #1c1f26;
-  --text: #f2f3f5;
-  --text-muted: #9aa1ac;
-  --accent: #3b82f6;
-  --accent-text: #ffffff;
+  --bg-main: #0B0F19;
+  --card-bg: #1E293B;
+  --card-border: rgba(255, 255, 255, 0.05);
+  --card-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+
+  --text-primary: #F8FAFC;
+  --text-secondary: #94A3B8;
+
+  --btn-primary-bg: #00F2FE;
+  --btn-primary-text: #0B0F19;
+  --btn-shadow: 0 4px 20px rgba(0, 242, 254, 0.25);
+
+  --accent-cyan: #00F2FE;
+  --accent-gold: #F59E0B;
+  --status-inactive: #94A3B8;
+
   --danger: #f87171;
-  --border: #2a2e37;
-  --nav-bg: #1c1f26;
+  --nav-bg: #1E293B;
 }
 
 * { box-sizing: border-box; }
@@ -55,8 +95,8 @@
 html, body {
   margin: 0;
   padding: 0;
-  background: var(--bg);
-  color: var(--text);
+  background: var(--bg-main);
+  color: var(--text-primary);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
   overflow-x: hidden;
 }
@@ -65,16 +105,18 @@ body {
   padding-top: env(safe-area-inset-top);
   padding-bottom: calc(64px + env(safe-area-inset-bottom));
   min-height: 100vh;
+  transition: background-color 0.3s ease, color 0.3s ease;
 }
 
 .topbar {
   position: sticky;
   top: 0;
   z-index: 10;
-  background: var(--surface);
-  border-bottom: 1px solid var(--border);
+  background: var(--card-bg);
+  border-bottom: 1px solid var(--card-border);
   padding: 14px 16px;
   padding-top: calc(14px + env(safe-area-inset-top));
+  transition: background-color 0.3s ease, border-color 0.3s ease;
 }
 
 .topbar h1 {
@@ -85,7 +127,7 @@ body {
 .topbar-subtitle {
   margin: 2px 0 0;
   font-size: 12px;
-  color: var(--text-muted);
+  color: var(--text-secondary);
 }
 
 #app {
@@ -122,8 +164,8 @@ body {
 .spinner {
   width: 32px;
   height: 32px;
-  border: 3px solid var(--border);
-  border-top-color: var(--accent);
+  border: 3px solid var(--card-border);
+  border-top-color: var(--accent-cyan);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
 }
@@ -140,17 +182,19 @@ body {
 .screen[hidden] { display: none; }
 
 .card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 18px;
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 20px;
+  padding: 20px;
   margin-bottom: 14px;
+  box-shadow: var(--card-shadow);
+  transition: background-color 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
 }
 
 .card-title {
   margin: 0 0 6px;
   font-size: 13px;
-  color: var(--text-muted);
+  color: var(--text-secondary);
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
@@ -161,29 +205,37 @@ body {
   font-size: 17px;
   font-weight: 600;
   margin: 0 0 2px;
+  color: var(--text-primary);
+}
+
+.status-label.is-inactive {
+  color: var(--status-inactive);
 }
 
 .status-sub {
   font-size: 14px;
-  color: var(--text-muted);
+  color: var(--text-secondary);
   margin: 0 0 16px;
   min-height: 18px;
 }
 
 .big-button {
   width: 100%;
-  padding: 18px;
+  padding: 16px;
   font-size: 18px;
   font-weight: 700;
   border: none;
   border-radius: 14px;
-  background: var(--accent);
-  color: var(--accent-text);
+  background: var(--btn-primary-bg);
+  color: var(--btn-primary-text);
+  box-shadow: var(--btn-shadow);
   cursor: pointer;
+  transition: all 0.3s ease;
 }
 
 .big-button.is-clockedin {
   background: var(--danger);
+  box-shadow: none;
 }
 
 .big-button:active { opacity: 0.85; }
@@ -193,10 +245,10 @@ body {
   padding: 14px;
   font-size: 15px;
   font-weight: 600;
-  border: 1px solid var(--border);
+  border: 1px solid var(--card-border);
   border-radius: 12px;
-  background: var(--surface);
-  color: var(--text);
+  background: var(--card-bg);
+  color: var(--text-primary);
   cursor: pointer;
   margin-bottom: 14px;
 }
@@ -205,11 +257,12 @@ body {
   font-size: 36px;
   font-weight: 800;
   margin: 4px 0;
+  color: var(--accent-gold);
 }
 
 .points-sub {
   font-size: 13px;
-  color: var(--text-muted);
+  color: var(--text-secondary);
   margin: 0;
 }
 
@@ -223,7 +276,7 @@ body {
 
 .table-scroll {
   overflow-x: auto;
-  border: 1px solid var(--border);
+  border: 1px solid var(--card-border);
   border-radius: 12px;
   margin-top: 14px;
 }
@@ -239,7 +292,7 @@ body {
 .log-table td {
   padding: 8px 10px;
   text-align: left;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--card-border);
 }
 
 .log-table td.cell-edited {
@@ -251,13 +304,13 @@ body {
 }
 
 .log-table tbody tr:active {
-  background: var(--bg);
+  background: var(--bg-main);
 }
 
 .breakdown-link {
   border: none;
   background: none;
-  color: var(--accent);
+  color: var(--accent-cyan);
   text-decoration: underline;
   text-decoration-style: dotted;
   font-size: 14px;
@@ -266,8 +319,8 @@ body {
 }
 
 .log-table th {
-  background: var(--surface);
-  color: var(--text-muted);
+  background: var(--card-bg);
+  color: var(--text-secondary);
   font-weight: 600;
   position: sticky;
   top: 0;
@@ -284,7 +337,7 @@ body {
 
 .totals-label {
   font-size: 12px;
-  color: var(--text-muted);
+  color: var(--text-secondary);
   margin: 0 0 2px;
 }
 
@@ -296,7 +349,7 @@ body {
 
 .totals-sub {
   font-size: 13px;
-  color: var(--text-muted);
+  color: var(--text-secondary);
   margin: 2px 0 0;
 }
 
@@ -307,8 +360,8 @@ body {
 }
 
 .list-item {
-  background: var(--surface);
-  border: 1px solid var(--border);
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
   border-radius: 12px;
   padding: 12px 14px;
   margin-bottom: 10px;
@@ -327,12 +380,12 @@ body {
 }
 
 .list-item-sub {
-  color: var(--text-muted);
+  color: var(--text-secondary);
   font-size: 13px;
 }
 
 .list-empty {
-  color: var(--text-muted);
+  color: var(--text-secondary);
   text-align: center;
   padding: 24px 0;
   font-size: 14px;
@@ -341,7 +394,7 @@ body {
 .field-label {
   display: block;
   font-size: 13px;
-  color: var(--text-muted);
+  color: var(--text-secondary);
   margin: 10px 0 4px;
 }
 
@@ -351,16 +404,16 @@ body {
   width: 100%;
   padding: 12px;
   border-radius: 10px;
-  border: 1px solid var(--border);
-  background: var(--bg);
-  color: var(--text);
+  border: 1px solid var(--card-border);
+  background: var(--bg-main);
+  color: var(--text-primary);
   font-size: 15px;
   margin-bottom: 6px;
 }
 
 .field-hint {
   font-size: 12px;
-  color: var(--text-muted);
+  color: var(--text-secondary);
   margin: 4px 0 0;
 }
 
@@ -385,9 +438,10 @@ body {
   right: 0;
   display: flex;
   background: var(--nav-bg);
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--card-border);
   padding-bottom: env(safe-area-inset-bottom);
   z-index: 10;
+  transition: background-color 0.3s ease, border-color 0.3s ease;
 }
 
 .nav-btn {
@@ -395,7 +449,7 @@ body {
   min-width: 0;
   border: none;
   background: none;
-  color: var(--text-muted);
+  color: var(--text-secondary);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -405,7 +459,7 @@ body {
   cursor: pointer;
 }
 
-.nav-btn.active { color: var(--accent); }
+.nav-btn.active { color: var(--accent-cyan); }
 
 .nav-icon { font-size: 20px; }
 img.nav-icon {
@@ -430,10 +484,11 @@ img.nav-icon {
   width: 100%;
   max-height: 80vh;
   overflow-y: auto;
-  background: var(--surface);
+  background: var(--card-bg);
   border-radius: 18px 18px 0 0;
   padding: 20px;
   padding-bottom: calc(20px + env(safe-area-inset-bottom));
+  transition: background-color 0.3s ease;
 }
 
 .modal h2 {
@@ -446,10 +501,10 @@ img.nav-icon {
   text-align: left;
   padding: 14px;
   margin-bottom: 8px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--card-border);
   border-radius: 12px;
-  background: var(--bg);
-  color: var(--text);
+  background: var(--bg-main);
+  color: var(--text-primary);
   font-size: 15px;
   cursor: pointer;
 }
@@ -471,18 +526,19 @@ img.nav-icon {
 }
 
 .modal-actions .btn-primary {
-  background: var(--accent);
-  color: var(--accent-text);
+  background: var(--btn-primary-bg);
+  color: var(--btn-primary-text);
+  box-shadow: var(--btn-shadow);
 }
 
 .modal-actions .btn-plain {
-  background: var(--bg);
-  color: var(--text);
-  border: 1px solid var(--border);
+  background: var(--bg-main);
+  color: var(--text-primary);
+  border: 1px solid var(--card-border);
 }
 
 .modal-actions .btn-danger {
-  background: var(--bg);
+  background: var(--bg-main);
   color: var(--danger);
   border: 1px solid var(--danger);
 }
