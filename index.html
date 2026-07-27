@@ -63,13 +63,22 @@
     <div class="card status-card">
       <p class="status-label" id="status-label">Not clocked in</p>
       <p class="status-sub" id="status-sub"></p>
+      <p class="status-timer" id="status-timer" hidden></p>
       <button class="big-button" id="btn-clock" type="button">Clock In</button>
     </div>
 
-    <div class="card">
-      <p class="card-title">Luba points this month</p>
-      <p class="points-balance" id="home-points-balance">0</p>
-      <p class="points-sub" id="home-points-sub"></p>
+    <div class="home-grid">
+      <div class="card">
+        <p class="card-title">Luba points this month</p>
+        <p class="points-balance" id="home-points-balance">0</p>
+        <p class="points-sub" id="home-points-sub"></p>
+      </div>
+
+      <div class="card" id="home-pay-card">
+        <p class="card-title">Estimated pay this month</p>
+        <p class="points-balance" id="home-pay-balance">₪0</p>
+        <p class="points-sub">Tap for breakdown</p>
+      </div>
     </div>
   </section>
 

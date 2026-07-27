@@ -216,6 +216,10 @@ async function handleAuthenticatedUser(user) {
 function handleLogout() {
   if (unsubscribeCloud) unsubscribeCloud();
   unsubscribeCloud = null;
+  if (clockTimerInterval) {
+    clearInterval(clockTimerInterval);
+    clockTimerInterval = null;
+  }
   currentUid = null;
   currentUserLabel = "";
   state = null;
@@ -244,6 +248,14 @@ function formatDate(date) {
 }
 function formatILS(n) {
   return `₪${n.toFixed(2)}`;
+}
+function formatElapsed(ms) {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const pad = (n) => String(n).padStart(2, "0");
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = totalSeconds % 60;
+  return `${pad(h)}:${pad(m)}:${pad(s)}`;
 }
 function sameMonth(dateA, dateB) {
   return dateA.getFullYear() === dateB.getFullYear() && dateA.getMonth() === dateB.getMonth();
@@ -631,10 +643,19 @@ function monthlyBalance(referenceDate = new Date()) {
 
 // ---------- render: home ----------
 
+let clockTimerInterval = null;
+
+function updateStatusTimer() {
+  if (!state || !state.currentPunch) return;
+  const elapsed = Date.now() - new Date(state.currentPunch.clockInISO).getTime();
+  document.getElementById("status-timer").textContent = formatElapsed(elapsed);
+}
+
 function renderHome() {
   applyTheme();
   const statusLabel = document.getElementById("status-label");
   const statusSub = document.getElementById("status-sub");
+  const statusTimer = document.getElementById("status-timer");
 
   if (state.currentPunch) {
     const clockIn = new Date(state.currentPunch.clockInISO);
@@ -643,18 +664,34 @@ function renderHome() {
     clockBtn.textContent = "Clock Out";
     clockBtn.classList.add("is-clockedin");
     statusLabel.classList.remove("is-inactive");
+    statusTimer.hidden = false;
+    updateStatusTimer();
+    if (!clockTimerInterval) clockTimerInterval = setInterval(updateStatusTimer, 1000);
   } else {
     statusLabel.textContent = "Not clocked in";
     statusSub.textContent = "";
     clockBtn.textContent = "Clock In";
     clockBtn.classList.remove("is-clockedin");
     statusLabel.classList.add("is-inactive");
+    statusTimer.hidden = true;
+    if (clockTimerInterval) {
+      clearInterval(clockTimerInterval);
+      clockTimerInterval = null;
+    }
   }
 
   const { balance, earned, spent } = monthlyBalance();
   document.getElementById("home-points-balance").textContent = balance;
   document.getElementById("home-points-sub").textContent = `${earned} earned − ${spent} spent this month`;
+
+  const monthStats = computeMoreStats(new Date());
+  document.getElementById("home-pay-balance").textContent = formatILS(monthStats.monthPay);
 }
+
+document.getElementById("home-pay-card").addEventListener("click", () => {
+  const monthStats = computeMoreStats(new Date());
+  openMonthlyBreakdownModal(monthStats.monthPunches, new Date());
+});
 
 // ---------- render: history (Monthly Attendance) ----------
 

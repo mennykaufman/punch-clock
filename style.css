@@ -219,6 +219,33 @@ body {
   min-height: 18px;
 }
 
+.status-timer {
+  font-size: 20px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent-cyan);
+  margin: -10px 0 16px;
+}
+
+.home-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+.home-grid .card {
+  margin-bottom: 0;
+  padding: 16px;
+}
+
+.home-grid .points-balance {
+  font-size: 28px;
+}
+
+#home-pay-card {
+  cursor: pointer;
+}
+
 .big-button {
   width: 100%;
   padding: 16px;
