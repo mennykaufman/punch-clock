@@ -13,6 +13,7 @@ import {
   onAuthStateChanged,
   signOut,
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
+import { getAnalytics, logEvent, isSupported as isAnalyticsSupported } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-analytics.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyDQXhynPNzqfKfLF4dTZiNIqrP3UQzM_HU",
@@ -21,11 +22,36 @@ const firebaseConfig = {
   storageBucket: "mennys-punch-clock.firebasestorage.app",
   messagingSenderId: "817102912808",
   appId: "1:817102912808:web:484958adc478241fa3241d",
+  // Fill this in from Firebase Console > Project Settings > General > Your apps,
+  // after linking Google Analytics to the project (see setup instructions).
+  14600DJCP6: "",
 };
 
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 const auth = getAuth(app);
+
+// Analytics is best-effort: it needs a measurementId (only present once Analytics
+// is linked in the Firebase Console) and isn't supported in every environment
+// (e.g. some in-app browsers), so every failure here is swallowed silently rather
+// than ever breaking the app itself.
+let analytics = null;
+if (firebaseConfig.measurementId) {
+  isAnalyticsSupported()
+    .then((supported) => {
+      if (supported) analytics = getAnalytics(app);
+    })
+    .catch(() => {});
+}
+
+export function logAnalyticsEvent(eventName, params) {
+  if (!analytics) return;
+  try {
+    logEvent(analytics, eventName, params);
+  } catch (err) {
+    console.error("analytics log failed:", err);
+  }
+}
 
 // Popup (not redirect) — redirect requires relaying the result back through the
 // firebaseapp.com auth domain, which browser storage restrictions on a custom domain

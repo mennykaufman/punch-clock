@@ -7,6 +7,7 @@ import {
   signInWithGoogle,
   onAuthChange,
   signOutUser,
+  logAnalyticsEvent,
 } from "./data/cloud.js";
 
 function defaultState(employmentStartDate = "", idfBonusPercent = 0) {
@@ -83,6 +84,8 @@ const appShell = document.getElementById("app-shell");
 const loginError = document.getElementById("login-error");
 const btnGoogleSignIn = document.getElementById("btn-google-signin");
 const googleSignInCard = document.getElementById("google-signin-card");
+const tosCheckbox = document.getElementById("tos-checkbox");
+const btnViewTos = document.getElementById("btn-view-tos");
 const welcomeCard = document.getElementById("welcome-card");
 const welcomeEmploymentStartDate = document.getElementById("welcome-employment-start-date");
 const welcomeIdfEligible = document.getElementById("welcome-idf-eligible");
@@ -135,6 +138,12 @@ function startCloudSync(uidKey) {
   });
 }
 
+tosCheckbox.addEventListener("change", () => {
+  btnGoogleSignIn.disabled = !tosCheckbox.checked;
+});
+
+btnViewTos.addEventListener("click", openTermsModal);
+
 btnGoogleSignIn.addEventListener("click", async () => {
   loginError.textContent = "";
   btnGoogleSignIn.disabled = true;
@@ -148,7 +157,7 @@ btnGoogleSignIn.addEventListener("click", async () => {
       ? "Sign-in was closed before finishing — try again."
       : "Couldn't sign in with Google. Try again.";
   } finally {
-    btnGoogleSignIn.disabled = false;
+    btnGoogleSignIn.disabled = !tosCheckbox.checked;
     btnGoogleSignIn.textContent = "Sign in with Google";
   }
 });
@@ -185,6 +194,7 @@ btnWelcomeContinue.addEventListener("click", async () => {
     startCloudSync(currentUid);
     showAppShell();
     renderHome();
+    logAnalyticsEvent("sign_up", { method: "google" });
   } catch (err) {
     console.error("welcome setup failed:", err);
     welcomeError.textContent = "Couldn't reach the server — check your internet connection and try again.";
@@ -205,13 +215,25 @@ async function handleAuthenticatedUser(user) {
       startCloudSync(currentUid);
       showAppShell();
       renderHome();
+      logAnalyticsEvent("login", { method: "google" });
     } else {
       showWelcomeCard();
     }
   } catch (err) {
     console.error("post sign-in check failed:", err);
-    loginError.textContent = "Couldn't reach the server — check your internet connection and try again.";
-    showLoginScreen();
+    // Offline (or the server just timed out) but this device has signed in before —
+    // fall back to the last-synced local copy instead of blocking the user out
+    // entirely. It'll pick back up with the cloud once startCloudSync gets a connection.
+    const cached = loadLocalCache(user.uid);
+    if (cached) {
+      state = cached;
+      startCloudSync(currentUid);
+      showAppShell();
+      renderHome();
+    } else {
+      loginError.textContent = "Couldn't reach the server — check your internet connection and try again.";
+      showLoginScreen();
+    }
   }
 }
 
@@ -286,6 +308,7 @@ function showScreen(name) {
   });
   document.getElementById("topbar-title").textContent = TITLES[name];
   document.getElementById("topbar-subtitle").hidden = name !== "home";
+  logAnalyticsEvent("screen_view", { firebase_screen: name });
   if (name === "history") renderHistory();
   if (name === "cafeteria") renderCafeteria();
   if (name === "settings") renderSettings();
@@ -318,6 +341,59 @@ function openModal(title) {
 modalBackdrop.addEventListener("click", (e) => {
   if (e.target === modalBackdrop) closeModal();
 });
+
+function openTermsModal() {
+  openModal("Terms of Service");
+  modalBody.innerHTML = `
+    <div dir="rtl" style="text-align: right;">
+      <h2 style="font-size: 18px; margin: 0 0 4px;">📜 1. תנאי שימוש (Terms of Service)</h2>
+      <p class="field-hint">עדכון אחרון: 28.07.2026</p>
+      <p>ברוכים הבאים ל-TrackO'clock ("האפליקציה"). השימוש באפליקציה כפוף לתנאים המפורטים להלן. עצם הרישום או השימוש באפליקציה מהווה הסכמה לתנאים אלו.</p>
+
+      <p><strong>1.1 מהות האפליקציה</strong><br/>
+      TrackO'clock היא אפליקציה המיועדת לספק כלי עזר אישי, נוח ושקוף למעקב אחר משמרות, שעות עבודה, חישוב הערכת שכר וניהול נקודות לובה.</p>
+      <p>הבהרה קריטית: האפליקציה אינה מערכת נוכחות רשמית של מעסיק, אינה מחליפה דיווח נוכחות כחוק במקום העבודה, ואינה מהווה תלוש שכר רשמי או יעוץ משפטי/חשבונאי.</p>
+
+      <p><strong>1.2 חישובי שכר והסתלקות מאחריות</strong><br/>
+      מנוע חישוב השכר באפליקציה מבוסס על אלגוריתמים המותאמים לחוקי העבודה בישראל ולנתונים שהוזנו על ידי המשתמש (תעריפים, תוספות, משמרות וכדומה).</p>
+      <p>החישובים המוצגים באפליקציה מהווים הערכה וסימולציה בלבד. התשלום בפועל נקבע אך ורק לפי רישומי המעסיק ותלוש השכר הרשמי.</p>
+      <p>מפתח האפליקציה אינו נושא באחריות לכל אי-התאמה, טעות, או נזק היפותטי שעלול להיגרם מהסתמכות על הנתונים המוצגים באפליקציה.</p>
+
+      <p><strong>1.3 קניין רוחני</strong><br/>
+      כל זכויות היוצרים, המותג, העיצוב, העבודות הגרפיות, הקוד והתוכן ב-TrackO'clock (כולל הסלוגנים והדמויות באפליקציה) שייכים בלעדית למפתח האפליקציה.</p>
+      <p>אין להעתיק, לשכפל, להנדס לאחור (Reverse Engineer) או לעשות שימוש מסחרי באפליקציה ללא אישור מפורש בכתב.</p>
+
+      <h2 style="font-size: 18px; margin: 20px 0 4px;">🔒 2. מדיניות פרטיות (Privacy Policy)</h2>
+      <p class="field-hint">עדכון אחרון: 28.07.2026</p>
+      <p>אנו ב-TrackO'clock מכבדים את הפרטיות שלך ומחויבים להגן על המידע האישי שלך.</p>
+
+      <p><strong>2.1 המידע שאנו אוספים</strong><br/>
+      כדי לספק לך את שירותי האפליקציה, אנו אוספים את המידע הבא בלבד:</p>
+      <p>פרטי זיהוי בסיסיים: בעת התחברות באמצעות Google, אנו מקבלים את שמך, כתובת הדוא"ל ותמונת הפרופיל שלך לצורך אימות מאובטח.</p>
+      <p>נתוני משמרות ושכר: שעות כניסה/יציאה, תעריפי בסיס, סוגי משמרות, ותיוגים שהזנת באופן יזום.</p>
+      <p>נתוני נקודות לובה: רישומי זיכוי, ניצול ואיפוס נקודות.</p>
+
+      <p><strong>2.2 איך אנחנו משתמשים במידע שלך?</strong><br/>
+      לצורך תפעול האפליקציה בלבד: הצגת הנתונים, ביצוע חישובי השכר האישיים, וסנכרון ענן מאובטח בין המכשירים השונים שלך.</p>
+      <p>אפס מסחר במידע: אנו לא מוכרים, משכירים או מעבירים את המידע האישי שלך לשום גורם שלישי או לצורכי פרסום.</p>
+
+      <p><strong>2.3 אבטחת מידע ואחסון</strong><br/>
+      הנתונים שלך מאוחסנים בשרתי ענן מאובטחים המשתמשים פרוטוקולי הצפנה מתקדמים (בסטנדרט בתעשייה).</p>
+      <p>האפליקציה תומכת גם בעבודה אופליין; נתונים שנרשמים ללא חיבור לרשת יישמרו מקומית ויסונכרנו בבטחה בעת התחברות מחדש.</p>
+
+      <p><strong>2.4 זכויות המשתמש ומחיקת מידע</strong><br/>
+      הנתונים שלך הם שלך בלבד.</p>
+      <p>באפשרותך לערוך או למחוק רשומות משמרת בכל עת מתוך מסך הנוכחות החודשי.</p>
+      <p>במידה ותרצה למחוק את חשבונך ואת כל הנתונים המקושרים אליו כליל מהשרתים שלנו, ניתן לעשות זאת ישירות דרך הגדרות החשבון באפליקציה או בפנייה במייל לתמיכה.</p>
+    </div>
+  `;
+
+  const closeBtn = document.createElement("button");
+  closeBtn.className = "btn-primary";
+  closeBtn.textContent = "Close";
+  closeBtn.addEventListener("click", closeModal);
+  modalActions.appendChild(closeBtn);
+}
 
 // ---------- shift matching UI ----------
 
@@ -447,6 +523,7 @@ async function handleClockIn() {
   state.currentPunch = { clockInISO: clockInDate.toISOString(), shift, shiftType };
   saveState();
   renderHome();
+  logAnalyticsEvent("clock_in", { shift_start: shift.start });
 }
 
 // Resolves the shift that actually applies given the real clock-out time:
@@ -546,6 +623,7 @@ async function handleClockOut() {
   state.currentPunch = null;
   saveState();
   renderHome();
+  logAnalyticsEvent("clock_out", { hours: punch.actualHours });
 
   showClockOutSummary(punch, pay, pointsDelta);
 }
@@ -657,6 +735,7 @@ function openLogPointsModal() {
     closeModal();
     renderHome();
     renderCafeteria();
+    logAnalyticsEvent("luba_points_logged", { points: pointsSpent, type });
   });
 
   const cancelBtn = document.createElement("button");
@@ -1127,6 +1206,7 @@ function exportMonthToXlsx(monthPunches, monthDate) {
   XLSX.utils.book_append_sheet(workbook, sheet, "Attendance");
   const monthName = monthDate.toLocaleDateString([], { year: "numeric", month: "2-digit" });
   XLSX.writeFile(workbook, `attendance-${monthName}.xlsx`);
+  logAnalyticsEvent("export_data", { format: "xlsx" });
 }
 
 function exportMonthToPdf(monthPunches, monthDate) {
@@ -1144,6 +1224,7 @@ function exportMonthToPdf(monthPunches, monthDate) {
   });
   const monthName = monthDate.toLocaleDateString([], { year: "numeric", month: "2-digit" });
   doc.save(`attendance-${monthName}.pdf`);
+  logAnalyticsEvent("export_data", { format: "pdf" });
 }
 
 // The month shown here always matches whatever month is currently browsed on the

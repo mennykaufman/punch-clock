@@ -19,16 +19,24 @@
 <div id="splash-screen">
   <div class="splash-branding">
     <h1 class="splash-title">TrackO'clock</h1>
-    <p class="splash-tagline">Know Your Pay. Track Your Luba.</p>
+    <p class="splash-tagline">TrackO'clock — Now I get it!</p>
   </div>
   <div class="spinner"></div>
 </div>
 
 <!-- LOGIN -->
 <div id="login-screen" hidden>
+  <div class="splash-branding">
+    <h1 class="splash-title">TrackO'clock</h1>
+    <p class="splash-tagline">TrackO'clock — Now I get it!</p>
+  </div>
   <div class="card login-card" id="google-signin-card">
     <p class="card-title">Sign in</p>
-    <button class="big-button" id="btn-google-signin" type="button">Sign in with Google</button>
+    <button class="big-button" id="btn-google-signin" type="button" disabled>Sign in with Google</button>
+    <label class="tos-row">
+      <input type="checkbox" id="tos-checkbox" />
+      <span>I accept the <button type="button" class="breakdown-link" id="btn-view-tos">Terms of Service</button></span>
+    </label>
     <p class="field-hint" id="login-error"></p>
   </div>
 
@@ -58,7 +66,7 @@
 <header class="topbar">
   <div class="topbar-titles">
     <h1 id="topbar-title">TrackO'clock</h1>
-    <p class="topbar-subtitle" id="topbar-subtitle">Know Your Pay. Track Your Luba.</p>
+    <p class="topbar-subtitle" id="topbar-subtitle">TrackO'clock — Now I get it!</p>
   </div>
   <span class="topbar-signature" id="topbar-signature">by menny</span>
 </header>
@@ -217,6 +225,7 @@
       <p class="card-title">Account</p>
       <p class="field-hint" id="signed-in-as"></p>
       <button class="secondary-button" id="btn-logout" type="button">Log out / Switch user</button>
+      <button class="danger-link" id="btn-delete-account" type="button">Delete my account</button>
     </div>
   </section>
 

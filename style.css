@@ -176,9 +176,19 @@ body {
 #login-screen {
   min-height: 100vh;
   display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: center;
-  padding: 16px;
+  justify-content: flex-end;
+  gap: 16px;
+  padding: 24px;
+  padding-bottom: calc(24px + env(safe-area-inset-bottom));
+  background:
+    linear-gradient(rgba(0, 0, 0, 0) 40%, rgba(0, 0, 0, 0.75) 100%),
+    url("icons/splash.jpg");
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  text-align: center;
 }
 
 #login-screen[hidden] { display: none; }
@@ -188,10 +198,12 @@ body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: space-between;
-  padding: 48px 24px 56px;
+  justify-content: flex-end;
+  gap: 20px;
+  padding: 24px;
+  padding-bottom: calc(24px + env(safe-area-inset-bottom));
   background:
-    linear-gradient(rgba(0, 0, 0, 0.6), rgba(0, 0, 0, 0) 35%),
+    linear-gradient(rgba(0, 0, 0, 0) 40%, rgba(0, 0, 0, 0.75) 100%),
     url("icons/splash.jpg");
   background-size: cover;
   background-position: center;
@@ -363,6 +375,32 @@ body {
 
 .big-button:active { opacity: 0.85; }
 
+.big-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.tos-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 12px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  text-align: left;
+}
+
+.tos-row input {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.tos-row .breakdown-link {
+  font-size: 13px;
+}
+
 .secondary-button {
   width: 100%;
   padding: 14px;
@@ -374,6 +412,19 @@ body {
   color: var(--text-primary);
   cursor: pointer;
   margin-bottom: 14px;
+}
+
+.danger-link {
+  display: block;
+  width: 100%;
+  text-align: center;
+  border: none;
+  background: none;
+  color: var(--danger);
+  font-size: 14px;
+  font-weight: 600;
+  padding: 6px 0;
+  cursor: pointer;
 }
 
 .points-balance {
