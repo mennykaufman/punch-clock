@@ -1,4 +1,4 @@
-const CACHE_NAME = "punchclock-v4";
+const CACHE_NAME = "punchclock-v5";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -40,7 +40,10 @@ self.addEventListener("fetch", (event) => {
   if (url.origin !== self.location.origin || event.request.method !== "GET") return;
 
   event.respondWith(
-    fetch(event.request)
+    // {cache: "reload"} here too — without it, this "network-first" fetch can still
+    // be silently answered by the browser's own HTTP cache within GitHub Pages'
+    // 10-minute Cache-Control window, serving stale content despite our own logic.
+    fetch(event.request, { cache: "reload" })
       .then((response) => {
         const copy = response.clone();
         caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
