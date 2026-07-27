@@ -188,12 +188,31 @@ body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: flex-end;
-  padding-bottom: 56px;
-  background-image: url("icons/splash.jpg");
+  justify-content: space-between;
+  padding: 48px 24px 56px;
+  background:
+    linear-gradient(rgba(0, 0, 0, 0.6), rgba(0, 0, 0, 0) 35%),
+    url("icons/splash.jpg");
   background-size: cover;
   background-position: center;
   background-repeat: no-repeat;
+  text-align: center;
+}
+
+.splash-branding { color: #fff; }
+
+.splash-title {
+  margin: 0;
+  font-size: 32px;
+  font-weight: 800;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+}
+
+.splash-tagline {
+  margin: 6px 0 0;
+  font-size: 15px;
+  opacity: 0.9;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.5);
 }
 
 #splash-screen[hidden] { display: none; }
