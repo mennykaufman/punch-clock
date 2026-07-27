@@ -17,6 +17,7 @@ function defaultState(employmentStartDate = "", idfBonusPercent = 0) {
       idfBonusPercent, // 0 = not eligible, else 2 or 3
       baseWageILS: BASE_WAGE_ILS,
       remindPointsOnClockOut: true,
+      trackShiftType: false, // optional per-user: tag each shift with a station/role
       theme: "system", // "system" | "dark" | "light"
       monthlyHoursGoal: 0, // 0 = no goal set
       moreWidgets: { hours: true, shifts: true, pay: true, averages: true, luba: true, export: true },
@@ -260,6 +261,9 @@ function formatElapsed(ms) {
 function sameMonth(dateA, dateB) {
   return dateA.getFullYear() === dateB.getFullYear() && dateA.getMonth() === dateB.getMonth();
 }
+function sameDay(dateA, dateB) {
+  return sameMonth(dateA, dateB) && dateA.getDate() === dateB.getDate();
+}
 function startOfWeek(date) {
   const d = new Date(date);
   d.setHours(0, 0, 0, 0);
@@ -318,6 +322,36 @@ modalBackdrop.addEventListener("click", (e) => {
 
 function shiftLabel(shift) {
   return `${shift.start}–${shift.end} (${shift.vouchers}, ${shift.points} pts)`;
+}
+
+// ---------- optional shift type (station/role) tagging ----------
+
+const SHIFT_TYPES = ["דלפק", "באגי יציאות", "דייל קונקורס", "באגי כניסות", "פסיפס", `דייל של"ן`];
+
+// Resolves to a chosen shift type string, or "" if skipped/cleared.
+function promptShiftType(current = "") {
+  return new Promise((resolve) => {
+    openModal("Shift type");
+    for (const type of SHIFT_TYPES) {
+      const btn = document.createElement("button");
+      btn.className = "modal-option";
+      btn.textContent = type;
+      if (type === current) btn.style.fontWeight = "800";
+      btn.addEventListener("click", () => {
+        closeModal();
+        resolve(type);
+      });
+      modalBody.appendChild(btn);
+    }
+    const skipBtn = document.createElement("button");
+    skipBtn.className = "btn-plain";
+    skipBtn.textContent = "None / Skip";
+    skipBtn.addEventListener("click", () => {
+      closeModal();
+      resolve("");
+    });
+    modalActions.appendChild(skipBtn);
+  });
 }
 
 // Resolves to a chosen shift object, or null if the user cancels.
@@ -405,7 +439,11 @@ async function handleClockIn() {
   const clockInDate = new Date();
   const shift = await resolveShiftForClockIn(clockInDate);
   if (!shift) return;
-  state.currentPunch = { clockInISO: clockInDate.toISOString(), shift };
+  let shiftType = "";
+  if (state.settings.trackShiftType) {
+    shiftType = await promptShiftType();
+  }
+  state.currentPunch = { clockInISO: clockInDate.toISOString(), shift, shiftType };
   saveState();
   renderHome();
 }
@@ -447,7 +485,7 @@ function resolveActualShift(pickedShift, clockOutDate) {
 // Shared by live clock-out, edits, and the manual "More" entry form: given the final
 // (already-resolved) shift and real clock-in/out times, computes pay and returns
 // everything needed to save a punch record, including whether Luba points moved.
-function buildPunch(clockInDate, clockOutDate, shift, pickedShift) {
+function buildPunch(clockInDate, clockOutDate, shift, pickedShift, shiftType = "") {
   const eligible = isProductivityBonusEligible(state.settings.employmentStartDate, clockOutDate);
   const pay = calculatePay(clockInDate, clockOutDate, {
     productivityBonusEligible: eligible,
@@ -461,6 +499,7 @@ function buildPunch(clockInDate, clockOutDate, shift, pickedShift) {
     clockInISO: clockInDate.toISOString(),
     clockOutISO: clockOutDate.toISOString(),
     shiftLabel: `${shift.start}-${shift.end}`,
+    shiftType,
     mealPoints: shift.points,
     voucherNote: shift.vouchers,
     actualHours: pay.totalHours,
@@ -492,7 +531,7 @@ async function handleClockOut() {
   }
 
   const shift = await resolveActualShift(pickedShift, clockOutDate);
-  const { punch, pay, pointsDelta } = buildPunch(clockInDate, clockOutDate, shift, pickedShift);
+  const { punch, pay, pointsDelta } = buildPunch(clockInDate, clockOutDate, shift, pickedShift, state.currentPunch.shiftType);
 
   state.punches.push(punch);
   state.currentPunch = null;
@@ -703,14 +742,21 @@ function renderHistory() {
     historyViewedMonth.toLocaleDateString([], { year: "numeric", month: "long" });
   document.getElementById("history-next-month").disabled = isCurrentMonth;
 
+  const showShiftType = !!state.settings.trackShiftType;
+  document.getElementById("history-th-shifttype").hidden = !showShiftType;
+  const colCount = showShiftType ? 5 : 4;
+
   const tbody = document.getElementById("history-table-body");
   tbody.innerHTML = "";
 
   const monthPunches = state.punches.filter((p) => sameMonth(new Date(p.clockInISO), historyViewedMonth));
   const sorted = [...monthPunches].sort((a, b) => new Date(a.clockInISO) - new Date(b.clockInISO));
 
+  const totalHours = monthPunches.reduce((sum, p) => sum + p.actualHours, 0);
+  document.getElementById("history-total-hours").textContent = `Total: ${totalHours.toFixed(1)} Hours`;
+
   if (!sorted.length) {
-    tbody.innerHTML = `<tr><td colspan="3" class="list-empty">No shifts logged this month</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="${colCount}" class="list-empty">No shifts logged this month</td></tr>`;
     return;
   }
 
@@ -720,9 +766,14 @@ function renderHistory() {
     const edited = p.editedFields || [];
     const inCellClass = edited.includes("clockIn") ? "cell-edited" : "";
     const outCellClass = edited.includes("clockOut") ? "cell-edited" : "";
+    const clockInDate = new Date(p.clockInISO);
+    const clockOutDate = new Date(p.clockOutISO);
+    const outSuffix = sameDay(clockInDate, clockOutDate) ? "" : " (+1)";
     tr.innerHTML = `
-      <td class="${inCellClass}">${formatDate(new Date(p.clockInISO))} ${formatTime(new Date(p.clockInISO))}</td>
-      <td class="${outCellClass}">${formatDate(new Date(p.clockOutISO))} ${formatTime(new Date(p.clockOutISO))}</td>
+      <td>${formatDate(clockInDate)}</td>
+      ${showShiftType ? `<td>${p.shiftType || "—"}</td>` : ""}
+      <td class="${inCellClass}">${formatTime(clockInDate)}</td>
+      <td class="${outCellClass}">${formatTime(clockOutDate)}${outSuffix}</td>
       <td>${p.actualHours}h</td>
     `;
     tbody.appendChild(tr);
@@ -789,6 +840,7 @@ function applyTheme() {
 function renderSettings() {
   document.getElementById("settings-base-wage").value = state.settings.baseWageILS || BASE_WAGE_ILS;
   document.getElementById("remind-points-toggle").checked = !!state.settings.remindPointsOnClockOut;
+  document.getElementById("track-shift-type-toggle").checked = !!state.settings.trackShiftType;
   document.getElementById("theme-select").value = state.settings.theme || "system";
   document.getElementById("monthly-hours-goal").value = state.settings.monthlyHoursGoal || "";
   document.getElementById("signed-in-as").textContent = currentUid ? `Signed in as: ${currentUserLabel}` : "";
@@ -857,6 +909,12 @@ document.getElementById("monthly-hours-goal").addEventListener("change", (e) => 
 document.getElementById("remind-points-toggle").addEventListener("change", (e) => {
   state.settings.remindPointsOnClockOut = e.target.checked;
   saveState();
+});
+
+document.getElementById("track-shift-type-toggle").addEventListener("change", (e) => {
+  state.settings.trackShiftType = e.target.checked;
+  saveState();
+  renderHistory();
 });
 
 document.getElementById("theme-select").addEventListener("change", (e) => {
@@ -1079,7 +1137,8 @@ function openManualEntryModal() {
     if (!pickedShift) return; // user cancelled the shift picker
 
     const shift = await resolveActualShift(pickedShift, clockOutDate);
-    const { punch } = buildPunch(clockInDate, clockOutDate, shift, pickedShift);
+    const shiftType = state.settings.trackShiftType ? await promptShiftType() : "";
+    const { punch } = buildPunch(clockInDate, clockOutDate, shift, pickedShift, shiftType);
     state.punches.push(punch);
     saveState();
     renderHistory();
@@ -1125,6 +1184,24 @@ function openEditPunchModal(punch) {
 
   modalBody.append(inLabel, inInput, outLabel, outInput, errorP);
 
+  let editedShiftType = punch.shiftType || "";
+  if (state.settings.trackShiftType) {
+    // A plain inline <select> here (not a nested modal) — this app has a single shared
+    // modal, so opening another one while this edit modal is still visible would wipe
+    // out this whole form instead of stacking on top of it.
+    const typeLabel = document.createElement("label");
+    typeLabel.className = "field-label";
+    typeLabel.textContent = "Shift type";
+    const typeSelect = document.createElement("select");
+    typeSelect.className = "field-input";
+    typeSelect.innerHTML = `<option value="">None</option>` + SHIFT_TYPES.map((t) => `<option value="${t}">${t}</option>`).join("");
+    typeSelect.value = editedShiftType;
+    typeSelect.addEventListener("change", () => {
+      editedShiftType = typeSelect.value;
+    });
+    modalBody.append(typeLabel, typeSelect);
+  }
+
   const saveBtn = document.createElement("button");
   saveBtn.className = "btn-primary";
   saveBtn.textContent = "Save";
@@ -1160,7 +1237,7 @@ function openEditPunchModal(punch) {
       pickedShift = { start: originalStart, end: originalEnd, points: punch.mealPoints, vouchers: punch.voucherNote };
     }
     shift = await resolveActualShift(pickedShift, clockOutDate);
-    const { punch: recalculated } = buildPunch(clockInDate, clockOutDate, shift, pickedShift);
+    const { punch: recalculated } = buildPunch(clockInDate, clockOutDate, shift, pickedShift, editedShiftType);
 
     const priorEditedFields = punch.editedFields || [];
     const editedFields = [...new Set([...priorEditedFields, ...changedFields])];

@@ -90,19 +90,24 @@
 
   <!-- MONTHLY ATTENDANCE (formerly History) -->
   <section class="screen" id="screen-history" data-screen hidden>
-    <div class="switch-row" id="history-month-nav">
-      <button class="breakdown-link" id="history-prev-month" type="button">◀ Prev</button>
+    <div class="month-nav" id="history-month-nav">
+      <button class="month-nav-btn" id="history-prev-month" type="button" aria-label="Previous month">◀</button>
       <strong id="history-month-label">Month</strong>
-      <button class="breakdown-link" id="history-next-month" type="button">Next ▶</button>
+      <button class="month-nav-btn month-nav-btn-next" id="history-next-month" type="button" aria-label="Next month">▶</button>
     </div>
-    <button class="secondary-button" id="btn-open-more" type="button">More</button>
+    <div class="attendance-summary-bar">
+      <span id="history-total-hours">Total: 0 Hours</span>
+      <button class="summary-details-btn" id="btn-open-more" type="button">ⓘ More Details</button>
+    </div>
     <div class="table-scroll">
       <table class="log-table">
         <thead>
           <tr>
-            <th>In</th>
-            <th>Out</th>
-            <th>Hours</th>
+            <th>Date</th>
+            <th id="history-th-shifttype" hidden>Shift Type</th>
+            <th>Clock In</th>
+            <th>Clock Out</th>
+            <th>Duration</th>
           </tr>
         </thead>
         <tbody id="history-table-body"></tbody>
@@ -144,6 +149,12 @@
       <label class="switch-row">
         <span>Remind me to log Luba points on clock-out</span>
         <input type="checkbox" id="remind-points-toggle" />
+      </label>
+    </div>
+    <div class="card">
+      <label class="switch-row">
+        <span>Track shift type (station/role per shift)</span>
+        <input type="checkbox" id="track-shift-type-toggle" />
       </label>
     </div>
     <div class="card">

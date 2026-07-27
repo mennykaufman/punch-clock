@@ -385,6 +385,67 @@ body {
 
 .log-table tbody tr:last-child td { border-bottom: none; }
 
+.month-nav {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  margin: 4px 0 14px;
+}
+
+.month-nav-btn {
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: none;
+  background: var(--card-bg);
+  color: var(--text-primary);
+  font-size: 15px;
+  cursor: pointer;
+  box-shadow: var(--card-shadow);
+}
+
+.month-nav-btn-next {
+  background: var(--accent-cyan);
+  color: var(--btn-primary-text);
+}
+
+.month-nav-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+#history-month-label {
+  font-size: 21px;
+  font-weight: 800;
+  color: var(--accent-cyan);
+}
+
+.attendance-summary-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 14px;
+  padding: 14px 16px;
+  margin-bottom: 14px;
+  font-weight: 700;
+  box-shadow: var(--card-shadow);
+}
+
+.summary-details-btn {
+  border: none;
+  background: none;
+  color: var(--accent-cyan);
+  font-weight: 700;
+  font-size: 14px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
 .totals-card { padding: 14px 18px; }
 
 .totals-row {
