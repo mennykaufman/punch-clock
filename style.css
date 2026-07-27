@@ -20,6 +20,7 @@
   --status-inactive: #8A8F98;
 
   --danger: #dc2626;
+  --success: #16A34A;
   --nav-bg: #F4EFE5;
 
   --topbar-bg: #F7F1E4;
@@ -48,6 +49,7 @@
     --status-inactive: #94A3B8;
 
     --danger: #f87171;
+    --success: #4ADE80;
     --nav-bg: #1E293B;
 
     --topbar-bg: #1E293B;
@@ -76,6 +78,7 @@
   --status-inactive: #8A8F98;
 
   --danger: #dc2626;
+  --success: #16A34A;
   --nav-bg: #F4EFE5;
 
   --topbar-bg: #F7F1E4;
@@ -102,6 +105,7 @@
   --status-inactive: #94A3B8;
 
   --danger: #f87171;
+  --success: #4ADE80;
   --nav-bg: #1E293B;
 
   --topbar-bg: #1E293B;
@@ -291,7 +295,7 @@ body {
   position: relative;
 }
 
-/* Decorative mascot art — only shown in dark mode for now (light-mode art pending). */
+/* Decorative mascot art peeking above a card. */
 .card-mascot {
   display: block;
   position: absolute;
@@ -307,6 +311,16 @@ body {
   pointer-events: none;
   border: 3px solid var(--card-bg);
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+}
+
+.card-mascot-large {
+  width: 110px;
+  height: 110px;
+  bottom: calc(100% - 32px);
+}
+
+.luba-avatar-wrap {
+  margin-top: 76px;
 }
 
 .big-button {
@@ -534,6 +548,11 @@ body {
   color: var(--text-secondary);
   font-size: 13px;
 }
+
+.pts-earned { color: var(--success); font-weight: 700; }
+.pts-spent { color: var(--danger); font-weight: 700; }
+
+.list-item.is-clickable { cursor: pointer; }
 
 .list-empty {
   color: var(--text-secondary);

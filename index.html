@@ -120,12 +120,20 @@
 
   <!-- CAFETERIA -->
   <section class="screen" id="screen-cafeteria" data-screen hidden>
-    <div class="card">
-      <p class="card-title">Balance this month</p>
-      <p class="points-balance" id="cafeteria-balance">0</p>
-      <p class="points-sub" id="cafeteria-balance-sub"></p>
+    <div class="month-nav" id="cafeteria-month-nav">
+      <button class="month-nav-btn" id="cafeteria-prev-month" type="button" aria-label="Previous month">◀</button>
+      <strong id="cafeteria-month-label">Month</strong>
+      <button class="month-nav-btn month-nav-btn-next" id="cafeteria-next-month" type="button" aria-label="Next month">▶</button>
     </div>
-    <button class="secondary-button" id="btn-log-points" type="button">Log Luba points used</button>
+    <div class="mascot-card-wrap luba-avatar-wrap">
+      <img class="card-mascot card-mascot-large" src="icons/luba-mascot.jpg" alt="" />
+      <div class="card">
+        <p class="card-title">Balance this month</p>
+        <p class="points-balance" id="cafeteria-balance">0</p>
+        <p class="points-sub" id="cafeteria-balance-sub"></p>
+      </div>
+    </div>
+    <button class="big-button" id="btn-log-points" type="button">Log Luba points used</button>
     <ul class="list" id="cafeteria-list"></ul>
   </section>
 

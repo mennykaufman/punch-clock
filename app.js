@@ -285,7 +285,6 @@ function showScreen(name) {
   });
   document.getElementById("topbar-title").textContent = TITLES[name];
   document.getElementById("topbar-subtitle").hidden = name !== "home";
-  document.getElementById("topbar-signature").hidden = name !== "home";
   if (name === "history") renderHistory();
   if (name === "cafeteria") renderCafeteria();
   if (name === "settings") renderSettings();
@@ -801,30 +800,150 @@ document.getElementById("history-next-month").addEventListener("click", () => {
 
 // ---------- render: cafeteria ----------
 
+let cafeteriaViewedMonth = new Date();
+
+// Builds one chronological feed mixing real spending log entries (editable) with
+// read-only "earned" entries derived from each completed shift's Luba points —
+// shifts aren't logged as cafeteria entries, so there's nothing to edit there;
+// editing what a shift earned means editing the shift itself, in Attendance.
+function buildCafeteriaFeed(referenceDate) {
+  const earnedEntries = state.punches
+    .filter((p) => p.mealPoints > 0 && sameMonth(new Date(p.clockOutISO), referenceDate))
+    .map((p) => ({
+      kind: "earned",
+      timestampISO: p.clockOutISO,
+      points: p.mealPoints,
+      note: p.shiftLabel,
+    }));
+
+  const spentEntries = state.cafeteriaSpending
+    .filter((s) => sameMonth(new Date(s.timestampISO), referenceDate))
+    .map((s) => ({
+      kind: "spent",
+      timestampISO: s.timestampISO,
+      points: s.pointsSpent,
+      note: s.note,
+      raw: s,
+    }));
+
+  return [...earnedEntries, ...spentEntries].sort((a, b) => new Date(b.timestampISO) - new Date(a.timestampISO));
+}
+
 function renderCafeteria() {
-  const { balance, earned, spent } = monthlyBalance();
+  const isCurrentMonth = sameMonth(cafeteriaViewedMonth, new Date());
+  document.getElementById("cafeteria-month-label").textContent =
+    cafeteriaViewedMonth.toLocaleDateString([], { year: "numeric", month: "long" });
+  document.getElementById("cafeteria-next-month").disabled = isCurrentMonth;
+
+  const { balance, earned, spent } = monthlyBalance(cafeteriaViewedMonth);
   document.getElementById("cafeteria-balance").textContent = balance;
   document.getElementById("cafeteria-balance-sub").textContent = `${earned} earned − ${spent} spent (resets next month)`;
 
   const list = document.getElementById("cafeteria-list");
   list.innerHTML = "";
-  const sorted = [...state.cafeteriaSpending].sort((a, b) => new Date(b.timestampISO) - new Date(a.timestampISO));
+  const feed = buildCafeteriaFeed(cafeteriaViewedMonth);
 
-  if (!sorted.length) {
-    list.innerHTML = `<li class="list-empty">No spending logged yet</li>`;
+  if (!feed.length) {
+    list.innerHTML = `<li class="list-empty">No Luba activity this month</li>`;
     return;
   }
 
-  for (const s of sorted) {
+  for (const entry of feed) {
     const li = document.createElement("li");
     li.className = "list-item";
-    const d = new Date(s.timestampISO);
+    const d = new Date(entry.timestampISO);
+    const sign = entry.kind === "earned" ? "+" : "-";
+    const colorClass = entry.kind === "earned" ? "pts-earned" : "pts-spent";
     li.innerHTML = `
-      <div class="list-item-row"><span>${formatDate(d)} ${formatTime(d)}</span><span>-${s.pointsSpent} pts</span></div>
-      ${s.note ? `<p class="list-item-sub">${s.note}</p>` : ""}
+      <div class="list-item-row"><span>${formatDate(d)} ${formatTime(d)}</span><span class="${colorClass}">${entry.kind} ${sign}${entry.points} pts</span></div>
+      ${entry.note ? `<p class="list-item-sub">${entry.note}</p>` : ""}
     `;
+    if (entry.kind === "spent") {
+      li.classList.add("is-clickable");
+      li.addEventListener("click", () => openEditSpendingModal(entry.raw));
+    }
     list.appendChild(li);
   }
+}
+
+document.getElementById("cafeteria-prev-month").addEventListener("click", () => {
+  cafeteriaViewedMonth = new Date(cafeteriaViewedMonth.getFullYear(), cafeteriaViewedMonth.getMonth() - 1, 1);
+  renderCafeteria();
+});
+
+document.getElementById("cafeteria-next-month").addEventListener("click", () => {
+  if (sameMonth(cafeteriaViewedMonth, new Date())) return;
+  cafeteriaViewedMonth = new Date(cafeteriaViewedMonth.getFullYear(), cafeteriaViewedMonth.getMonth() + 1, 1);
+  renderCafeteria();
+});
+
+function openEditSpendingModal(entry) {
+  openModal("Edit Luba points used");
+
+  const typeLabel = document.createElement("label");
+  typeLabel.className = "field-label";
+  typeLabel.textContent = "What was used?";
+  const typeSelect = document.createElement("select");
+  typeSelect.className = "field-input";
+  typeSelect.innerHTML = `
+    <option value="100">בשרי (100 נקודות)</option>
+    <option value="50">חלבי (50 נקודות)</option>
+    <option value="manual">Manual amount</option>
+  `;
+  typeSelect.value = entry.type === "meat" ? "100" : entry.type === "dairy" ? "50" : "manual";
+
+  const pointsInput = document.createElement("input");
+  pointsInput.className = "field-input";
+  pointsInput.type = "number";
+  pointsInput.min = "0";
+  pointsInput.placeholder = "Points spent";
+  pointsInput.value = entry.pointsSpent;
+  pointsInput.hidden = typeSelect.value !== "manual";
+
+  typeSelect.addEventListener("change", () => {
+    pointsInput.hidden = typeSelect.value !== "manual";
+  });
+
+  const noteInput = document.createElement("input");
+  noteInput.className = "field-input";
+  noteInput.type = "text";
+  noteInput.placeholder = "Note (optional)";
+  noteInput.value = entry.note || "";
+
+  modalBody.append(typeLabel, typeSelect, pointsInput, noteInput);
+
+  const saveBtn = document.createElement("button");
+  saveBtn.className = "btn-primary";
+  saveBtn.textContent = "Save";
+  saveBtn.addEventListener("click", () => {
+    const pointsSpent = typeSelect.value === "manual" ? parseInt(pointsInput.value, 10) : parseInt(typeSelect.value, 10);
+    if (!pointsSpent || pointsSpent <= 0) return;
+    entry.pointsSpent = pointsSpent;
+    entry.type = typeSelect.value === "100" ? "meat" : typeSelect.value === "50" ? "dairy" : "manual";
+    entry.note = noteInput.value.trim();
+    saveState();
+    closeModal();
+    renderHome();
+    renderCafeteria();
+  });
+
+  const deleteBtn = document.createElement("button");
+  deleteBtn.className = "btn-danger";
+  deleteBtn.textContent = "Delete";
+  deleteBtn.addEventListener("click", () => {
+    state.cafeteriaSpending = state.cafeteriaSpending.filter((s) => s.id !== entry.id);
+    saveState();
+    closeModal();
+    renderHome();
+    renderCafeteria();
+  });
+
+  const cancelBtn = document.createElement("button");
+  cancelBtn.className = "btn-plain";
+  cancelBtn.textContent = "Cancel";
+  cancelBtn.addEventListener("click", closeModal);
+
+  modalActions.append(deleteBtn, cancelBtn, saveBtn);
 }
 
 // ---------- render: settings ----------
