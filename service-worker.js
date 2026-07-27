@@ -1,4 +1,4 @@
-const CACHE_NAME = "punchclock-v5";
+const CACHE_NAME = "punchclock-v6";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -11,6 +11,8 @@ const APP_SHELL = [
   "./icons/icon-192.png",
   "./icons/icon-512.png",
   "./icons/splash.jpg",
+  "./icons/luba-mascot.jpg",
+  "./icons/menny-mascot.jpg",
 ];
 
 self.addEventListener("install", (event) => {

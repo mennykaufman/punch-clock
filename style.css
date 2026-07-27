@@ -231,6 +231,7 @@ body {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 14px;
+  margin-top: 60px;
 }
 
 .home-grid .card {
@@ -245,6 +246,32 @@ body {
 #home-pay-card {
   cursor: pointer;
 }
+
+.mascot-card-wrap {
+  position: relative;
+}
+
+/* Decorative mascot art — only shown in dark mode for now (light-mode art pending). */
+.card-mascot {
+  display: none;
+  position: absolute;
+  bottom: calc(100% - 26px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: 88px;
+  height: auto;
+  z-index: 2;
+  pointer-events: none;
+  mask-image: radial-gradient(ellipse 65% 60% at 50% 40%, black 55%, transparent 100%);
+  -webkit-mask-image: radial-gradient(ellipse 65% 60% at 50% 40%, black 55%, transparent 100%);
+}
+
+@media (prefers-color-scheme: dark) {
+  .card-mascot { display: block; }
+}
+
+:root[data-theme="dark"] .card-mascot { display: block; }
+:root[data-theme="light"] .card-mascot { display: none; }
 
 .big-button {
   width: 100%;
