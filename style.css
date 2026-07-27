@@ -255,15 +255,18 @@ body {
 .card-mascot {
   display: none;
   position: absolute;
-  bottom: calc(100% - 26px);
+  bottom: calc(100% - 22px);
   left: 50%;
   transform: translateX(-50%);
-  width: 88px;
-  height: auto;
+  width: 76px;
+  height: 76px;
+  border-radius: 50%;
+  object-fit: cover;
+  object-position: center 15%;
   z-index: 2;
   pointer-events: none;
-  mask-image: radial-gradient(ellipse 52% 50% at 50% 40%, black 25%, transparent 62%);
-  -webkit-mask-image: radial-gradient(ellipse 52% 50% at 50% 40%, black 25%, transparent 62%);
+  border: 3px solid var(--card-bg);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -518,6 +521,17 @@ body {
 .nav-icon {
   width: 22px;
   height: 22px;
+}
+
+.nav-icon-emoji {
+  font-size: 20px;
+  line-height: 1;
+  filter: grayscale(1);
+  transition: filter 0.2s ease;
+}
+
+.nav-btn.active .nav-icon-emoji {
+  filter: none;
 }
 
 .nav-icon-avatar {
