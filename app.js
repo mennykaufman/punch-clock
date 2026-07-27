@@ -285,6 +285,7 @@ function showScreen(name) {
   });
   document.getElementById("topbar-title").textContent = TITLES[name];
   document.getElementById("topbar-subtitle").hidden = name !== "home";
+  document.getElementById("topbar-signature").hidden = name !== "home";
   if (name === "history") renderHistory();
   if (name === "cafeteria") renderCafeteria();
   if (name === "settings") renderSettings();
@@ -698,7 +699,7 @@ function renderHome() {
 
   if (state.currentPunch) {
     const clockIn = new Date(state.currentPunch.clockInISO);
-    statusLabel.textContent = `Clocked in since ${formatTime(clockIn)}`;
+    statusLabel.innerHTML = `<span class="status-active-word">Clocked In</span> <span class="status-time-word">since ${formatTime(clockIn)}</span>`;
     statusSub.textContent = `Shift: ${state.currentPunch.shift.start}-${state.currentPunch.shift.end}`;
     clockBtn.textContent = "Clock Out";
     clockBtn.classList.add("is-clockedin");

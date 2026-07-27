@@ -3,24 +3,29 @@
    ========================================== */
 
 :root {
-  --bg-main: #F8FAFC;
+  --bg-main: #F4EFE5;
   --card-bg: #FFFFFF;
   --card-border: rgba(226, 232, 240, 0.8);
   --card-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
 
-  --text-primary: #0F172A;
-  --text-secondary: #64748B;
+  --text-primary: #1E2A3A;
+  --text-secondary: #6E7178;
 
-  --btn-primary-bg: #0284C7;
+  --btn-primary-bg: #1CA8C6;
   --btn-primary-text: #FFFFFF;
-  --btn-shadow: 0 4px 14px rgba(2, 132, 199, 0.3);
+  --btn-shadow: 0 4px 14px rgba(28, 168, 198, 0.35);
 
-  --accent-cyan: #0284C7;
-  --accent-gold: #D97706;
-  --status-inactive: #64748B;
+  --accent-cyan: #18C4DB;
+  --accent-gold: #9C6B31;
+  --status-inactive: #8A8F98;
 
   --danger: #dc2626;
-  --nav-bg: #FFFFFF;
+  --nav-bg: #F4EFE5;
+
+  --topbar-bg: #F7F1E4;
+  --status-card-bg: #D7F0ED;
+  --home-widget-bg: #E9E4DA;
+  --status-active-color: #106157;
   color-scheme: light dark;
 }
 
@@ -44,29 +49,39 @@
 
     --danger: #f87171;
     --nav-bg: #1E293B;
+
+    --topbar-bg: #1E293B;
+    --status-card-bg: #1E293B;
+    --home-widget-bg: #1E293B;
+    --status-active-color: #F8FAFC;
   }
 }
 
 /* Explicit user choice (Settings > Dark Mode) always wins over the system default above. */
 :root[data-theme="light"] {
-  --bg-main: #F8FAFC;
+  --bg-main: #F4EFE5;
   --card-bg: #FFFFFF;
   --card-border: rgba(226, 232, 240, 0.8);
   --card-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
 
-  --text-primary: #0F172A;
-  --text-secondary: #64748B;
+  --text-primary: #1E2A3A;
+  --text-secondary: #6E7178;
 
-  --btn-primary-bg: #0284C7;
+  --btn-primary-bg: #1CA8C6;
   --btn-primary-text: #FFFFFF;
-  --btn-shadow: 0 4px 14px rgba(2, 132, 199, 0.3);
+  --btn-shadow: 0 4px 14px rgba(28, 168, 198, 0.35);
 
-  --accent-cyan: #0284C7;
-  --accent-gold: #D97706;
-  --status-inactive: #64748B;
+  --accent-cyan: #18C4DB;
+  --accent-gold: #9C6B31;
+  --status-inactive: #8A8F98;
 
   --danger: #dc2626;
-  --nav-bg: #FFFFFF;
+  --nav-bg: #F4EFE5;
+
+  --topbar-bg: #F7F1E4;
+  --status-card-bg: #D7F0ED;
+  --home-widget-bg: #E9E4DA;
+  --status-active-color: #106157;
 }
 
 :root[data-theme="dark"] {
@@ -88,6 +103,11 @@
 
   --danger: #f87171;
   --nav-bg: #1E293B;
+
+  --topbar-bg: #1E293B;
+  --status-card-bg: #1E293B;
+  --home-widget-bg: #1E293B;
+  --status-active-color: #F8FAFC;
 }
 
 * { box-sizing: border-box; }
@@ -112,7 +132,11 @@ body {
   position: sticky;
   top: 0;
   z-index: 10;
-  background: var(--card-bg);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: var(--topbar-bg);
   border-bottom: 1px solid var(--card-border);
   padding: 14px 16px;
   padding-top: calc(14px + env(safe-area-inset-top));
@@ -122,6 +146,15 @@ body {
 .topbar h1 {
   margin: 0;
   font-size: 20px;
+}
+
+.topbar-signature {
+  font-family: "Brush Script MT", "Segoe Script", cursive;
+  font-style: italic;
+  font-size: 20px;
+  color: var(--accent-gold);
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .topbar-subtitle {
@@ -199,7 +232,10 @@ body {
   letter-spacing: 0.04em;
 }
 
-.status-card { text-align: center; }
+.status-card {
+  text-align: center;
+  background: var(--status-card-bg);
+}
 
 .status-label {
   font-size: 17px;
@@ -207,6 +243,9 @@ body {
   margin: 0 0 2px;
   color: var(--text-primary);
 }
+
+.status-active-word { color: var(--status-active-color); }
+.status-time-word { color: var(--accent-gold); }
 
 .status-label.is-inactive {
   color: var(--status-inactive);
@@ -237,6 +276,7 @@ body {
 .home-grid .card {
   margin-bottom: 0;
   padding: 16px;
+  background: var(--home-widget-bg);
 }
 
 .home-grid .points-balance {
