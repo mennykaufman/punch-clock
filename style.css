@@ -253,7 +253,7 @@ body {
 
 /* Decorative mascot art — only shown in dark mode for now (light-mode art pending). */
 .card-mascot {
-  display: none;
+  display: block;
   position: absolute;
   bottom: calc(100% - 22px);
   left: 50%;
@@ -266,15 +266,8 @@ body {
   z-index: 2;
   pointer-events: none;
   border: 3px solid var(--card-bg);
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
 }
-
-@media (prefers-color-scheme: dark) {
-  .card-mascot { display: block; }
-}
-
-:root[data-theme="dark"] .card-mascot { display: block; }
-:root[data-theme="light"] .card-mascot { display: none; }
 
 .big-button {
   width: 100%;
