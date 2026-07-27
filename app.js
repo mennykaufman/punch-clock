@@ -15,6 +15,7 @@ function defaultState(employmentStartDate = "", idfBonusPercent = 0) {
     settings: {
       employmentStartDate,
       idfBonusPercent, // 0 = not eligible, else 2 or 3
+      productivityBonusOverride: null, // null = auto (3-month rule), true/false = manual override
       baseWageILS: BASE_WAGE_ILS,
       remindPointsOnClockOut: true,
       trackShiftType: false, // optional per-user: tag each shift with a station/role
@@ -485,8 +486,16 @@ function resolveActualShift(pickedShift, clockOutDate) {
 // Shared by live clock-out, edits, and the manual "More" entry form: given the final
 // (already-resolved) shift and real clock-in/out times, computes pay and returns
 // everything needed to save a punch record, including whether Luba points moved.
+// The manual override (if set) always wins over the 3-month auto-calculation —
+// lets a user correct the system if their real eligibility differs for any reason.
+function currentProductivityBonusEnabled(referenceDate = new Date()) {
+  const override = state.settings.productivityBonusOverride;
+  if (override === true || override === false) return override;
+  return isProductivityBonusEligible(state.settings.employmentStartDate, referenceDate);
+}
+
 function buildPunch(clockInDate, clockOutDate, shift, pickedShift, shiftType = "") {
-  const eligible = isProductivityBonusEligible(state.settings.employmentStartDate, clockOutDate);
+  const eligible = currentProductivityBonusEnabled(clockOutDate);
   const pay = calculatePay(clockInDate, clockOutDate, {
     productivityBonusEligible: eligible,
     idfBonusPercent: state.settings.idfBonusPercent || 0,
@@ -554,7 +563,7 @@ function showClockOutSummary(punch, pay, pointsDelta) {
 
   body.innerHTML = `
     <p><strong>${punch.actualHours}h</strong> worked (${punch.shiftLabel})</p>
-    <p>Pay: <strong>${formatILS(punch.payILS)}</strong>${pay.productivityBonusApplied ? " (incl. +10% פריון)" : ""}</p>
+    <p>Pay: <strong>${formatILS(punch.payILS)}</strong>${pay.productivityBonusApplied ? " (incl. +10% seniority bonus)" : ""}</p>
     <p>Luba points earned: <strong>${punch.mealPoints}</strong> (${punch.voucherNote})</p>
     ${adjustmentNote}
   `;
@@ -966,18 +975,24 @@ function renderSettings() {
   document.getElementById("signed-in-as").textContent = currentUid ? `Signed in as: ${currentUserLabel}` : "";
 
   document.getElementById("settings-employment-start-date").value = state.settings.employmentStartDate || "";
+
   const idfPercent = state.settings.idfBonusPercent || 0;
-  document.getElementById("settings-idf-eligible").checked = idfPercent > 0;
-  document.getElementById("settings-idf-percent").hidden = idfPercent <= 0;
-  document.getElementById("settings-idf-percent").value = idfPercent > 0 ? String(idfPercent) : "2";
+  document.querySelectorAll("#idf-bonus-segmented .segmented-option").forEach((btn) => {
+    btn.classList.toggle("active", Number(btn.dataset.value) === idfPercent);
+  });
+
+  const seniorityEnabled = currentProductivityBonusEnabled();
+  document.getElementById("settings-seniority-toggle").checked = seniorityEnabled;
 
   const hint = document.getElementById("settings-bonus-hint");
-  if (!state.settings.employmentStartDate) {
-    hint.textContent = "Set your start date to auto-apply the 10% פריון bonus after 3 months.";
+  const isOverridden = state.settings.productivityBonusOverride === true || state.settings.productivityBonusOverride === false;
+  if (isOverridden) {
+    hint.textContent = `Manually ${seniorityEnabled ? "enabled" : "disabled"} (overriding the 3-month rule).`;
+  } else if (!state.settings.employmentStartDate) {
+    hint.textContent = "Set your start date to auto-apply the 10% seniority bonus after 3 months.";
   } else {
-    const eligible = isProductivityBonusEligible(state.settings.employmentStartDate);
-    hint.textContent = eligible
-      ? "Eligible for the 10% פריון bonus ✓"
+    hint.textContent = seniorityEnabled
+      ? "Eligible for the 10% seniority bonus ✓"
       : "Not yet eligible — applies automatically 3 months after your start date.";
   }
 
@@ -1008,17 +1023,18 @@ document.getElementById("settings-employment-start-date").addEventListener("chan
   renderSettings();
 });
 
-document.getElementById("settings-idf-eligible").addEventListener("change", (e) => {
-  document.getElementById("settings-idf-percent").hidden = !e.target.checked;
-  state.settings.idfBonusPercent = e.target.checked ? Number(document.getElementById("settings-idf-percent").value) : 0;
-  saveState();
+document.querySelectorAll("#idf-bonus-segmented .segmented-option").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    state.settings.idfBonusPercent = Number(btn.dataset.value);
+    saveState();
+    renderSettings();
+  });
 });
 
-document.getElementById("settings-idf-percent").addEventListener("change", (e) => {
-  if (document.getElementById("settings-idf-eligible").checked) {
-    state.settings.idfBonusPercent = Number(e.target.value);
-    saveState();
-  }
+document.getElementById("settings-seniority-toggle").addEventListener("change", (e) => {
+  state.settings.productivityBonusOverride = e.target.checked;
+  saveState();
+  renderSettings();
 });
 
 document.getElementById("monthly-hours-goal").addEventListener("change", (e) => {
@@ -1476,12 +1492,12 @@ function openMonthlyBreakdownModal(monthPunches, monthDate) {
     const b = computeMonthlyPayBreakdown(monthPunches);
     const rateRows = b.hoursByRate.map((r) => [`Hours at ${r.ratePercent}%`, `${r.hours}h — ${formatILS(r.amountILS)}`]);
     const idfLabel = b.idfPercentsUsed.size === 1
-      ? `+${[...b.idfPercentsUsed][0]}% צה"ל bonus`
-      : `צה"ל bonus`;
+      ? `+${[...b.idfPercentsUsed][0]}% IDF bonus`
+      : `IDF bonus`;
     const rows = [
       ...rateRows,
       ["Before bonuses", formatILS(b.totalPreBonus)],
-      ["+10% פריון bonus", b.anyProductivityBonus ? formatILS(b.totalProductivityAmount) : "Not applied"],
+      ["+10% seniority bonus", b.anyProductivityBonus ? formatILS(b.totalProductivityAmount) : "Not applied"],
       [idfLabel, b.idfPercentsUsed.size ? formatILS(b.totalIdfAmount) : "Not applied"],
       ["Total pay this month", formatILS(b.totalFinal)],
     ];
@@ -1509,10 +1525,10 @@ function openPayBreakdownModal(punch) {
     const rows = [
       ...rateRows,
       ["Before bonus", formatILS(pay.preBonusPayILS)],
-      ["+10% פריון bonus", pay.productivityBonusApplied ? "Applied" : "Not applied"],
+      ["+10% seniority bonus", pay.productivityBonusApplied ? "Applied" : "Not applied"],
     ];
     if (pay.idfBonusPercent) {
-      rows.push([`+${pay.idfBonusPercent}% צה"ל bonus`, "Applied"]);
+      rows.push([`+${pay.idfBonusPercent}% IDF bonus`, "Applied"]);
     }
     rows.push(["Total pay for this shift", formatILS(pay.finalPayILS)]);
     modalBody.innerHTML = rows.map(([label, value]) => `<p>${label}: <strong>${value}</strong></p>`).join("");
