@@ -4,6 +4,7 @@ import {
   doc,
   getDoc,
   setDoc,
+  deleteDoc,
   onSnapshot,
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 import {
@@ -12,6 +13,7 @@ import {
   signInWithPopup,
   onAuthStateChanged,
   signOut,
+  deleteUser,
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
 import { getAnalytics, logEvent, isSupported as isAnalyticsSupported } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-analytics.js";
 
@@ -24,7 +26,7 @@ const firebaseConfig = {
   appId: "1:817102912808:web:484958adc478241fa3241d",
   // Fill this in from Firebase Console > Project Settings > General > Your apps,
   // after linking Google Analytics to the project (see setup instructions).
-  14600DJCP6: "",
+  measurementId: "",
 };
 
 const app = initializeApp(firebaseConfig);
@@ -84,6 +86,17 @@ export async function fetchUserData(employeeId) {
 
 export async function saveUserData(employeeId, data) {
   await setDoc(userRef(employeeId), data);
+}
+
+// Permanently removes the account's data document and the Firebase Auth account
+// itself. deleteUser can throw "auth/requires-recent-login" if the session is
+// old — the caller should catch that specifically and ask the user to sign in
+// again before retrying, rather than treating it as a generic failure.
+export async function deleteUserAccount(employeeId) {
+  await deleteDoc(userRef(employeeId));
+  if (auth.currentUser) {
+    await deleteUser(auth.currentUser);
+  }
 }
 
 // Fires immediately with the current data, then again whenever it changes on any device.

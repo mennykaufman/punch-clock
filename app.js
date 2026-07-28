@@ -7,6 +7,7 @@ import {
   signInWithGoogle,
   onAuthChange,
   signOutUser,
+  deleteUserAccount,
   logAnalyticsEvent,
 } from "./data/cloud.js";
 
@@ -369,9 +370,10 @@ function openTermsModal() {
 
       <p><strong>2.1 המידע שאנו אוספים</strong><br/>
       כדי לספק לך את שירותי האפליקציה, אנו אוספים את המידע הבא בלבד:</p>
-      <p>פרטי זיהוי בסיסיים: בעת התחברות באמצעות Google, אנו מקבלים את שמך, כתובת הדוא"ל ותמונת הפרופיל שלך לצורך אימות מאובטח.</p>
+      <p>פרטי זיהוי בסיסיים: בעת התחברות באמצעות Google, אנו מקבלים את שמך וכתובת הדוא"ל שלך לצורך אימות מאובטח.</p>
       <p>נתוני משמרות ושכר: שעות כניסה/יציאה, תעריפי בסיס, סוגי משמרות, ותיוגים שהזנת באופן יזום.</p>
       <p>נתוני נקודות לובה: רישומי זיכוי, ניצול ואיפוס נקודות.</p>
+      <p>נתוני שימוש אנונימיים: אנו אוספים נתוני שימוש כלליים (כגון מסכים שנצפו ופעולות בסיסיות כמו כניסה/יציאה למשמרת) באמצעות Google Analytics for Firebase, לצורך הבנת השימוש באפליקציה ושיפורה בלבד.</p>
 
       <p><strong>2.2 איך אנחנו משתמשים במידע שלך?</strong><br/>
       לצורך תפעול האפליקציה בלבד: הצגת הנתונים, ביצוע חישובי השכר האישיים, וסנכרון ענן מאובטח בין המכשירים השונים שלך.</p>
@@ -384,7 +386,7 @@ function openTermsModal() {
       <p><strong>2.4 זכויות המשתמש ומחיקת מידע</strong><br/>
       הנתונים שלך הם שלך בלבד.</p>
       <p>באפשרותך לערוך או למחוק רשומות משמרת בכל עת מתוך מסך הנוכחות החודשי.</p>
-      <p>במידה ותרצה למחוק את חשבונך ואת כל הנתונים המקושרים אליו כליל מהשרתים שלנו, ניתן לעשות זאת ישירות דרך הגדרות החשבון באפליקציה או בפנייה במייל לתמיכה.</p>
+      <p>במידה ותרצה למחוק את חשבונך ואת כל הנתונים המקושרים אליו כליל מהשרתים שלנו, ניתן לעשות זאת ישירות דרך הגדרות החשבון באפליקציה.</p>
     </div>
   `;
 
@@ -1139,6 +1141,56 @@ document.getElementById("theme-select").addEventListener("change", (e) => {
 });
 
 document.getElementById("btn-logout").addEventListener("click", handleLogout);
+
+document.getElementById("btn-delete-account").addEventListener("click", openDeleteAccountModal);
+
+function openDeleteAccountModal() {
+  openModal("Delete your account?");
+  const p = document.createElement("p");
+  p.textContent = "This permanently deletes your account and all your data (shifts, Luba points, settings) from our servers. This can't be undone.";
+  modalBody.appendChild(p);
+  const errorP = document.createElement("p");
+  errorP.className = "field-hint";
+  modalBody.appendChild(errorP);
+
+  const confirmBtn = document.createElement("button");
+  confirmBtn.className = "btn-danger";
+  confirmBtn.textContent = "Delete permanently";
+  confirmBtn.addEventListener("click", async () => {
+    confirmBtn.disabled = true;
+    confirmBtn.textContent = "Deleting…";
+    try {
+      const uidToDelete = currentUid;
+      await deleteUserAccount(uidToDelete);
+      localStorage.removeItem(localCacheKey(uidToDelete));
+      if (unsubscribeCloud) unsubscribeCloud();
+      unsubscribeCloud = null;
+      if (clockTimerInterval) {
+        clearInterval(clockTimerInterval);
+        clockTimerInterval = null;
+      }
+      currentUid = null;
+      currentUserLabel = "";
+      state = null;
+      closeModal();
+      showLoginScreen();
+    } catch (err) {
+      console.error("account deletion failed:", err);
+      errorP.textContent = err?.code === "auth/requires-recent-login"
+        ? "For security, please log out and sign back in, then try deleting your account again."
+        : "Couldn't delete your account — check your connection and try again.";
+      confirmBtn.disabled = false;
+      confirmBtn.textContent = "Delete permanently";
+    }
+  });
+
+  const cancelBtn = document.createElement("button");
+  cancelBtn.className = "btn-plain";
+  cancelBtn.textContent = "Cancel";
+  cancelBtn.addEventListener("click", closeModal);
+
+  modalActions.append(cancelBtn, confirmBtn);
+}
 
 // ---------- "More": monthly summary + manual shift entry ----------
 
