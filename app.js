@@ -15,6 +15,9 @@ function defaultState(employmentStartDate = "", idfBonusPercent = 0) {
   return {
     seq: 0, // bumped on every local save so a late/out-of-order cloud snapshot can never clobber a newer local change
     settings: {
+      firstName: "",
+      lastName: "",
+      department: "",
       employmentStartDate,
       idfBonusPercent, // 0 = not eligible, else 2 or 3
       productivityBonusOverride: null, // null = auto (3-month rule), true/false = manual override
@@ -88,11 +91,12 @@ const googleSignInCard = document.getElementById("google-signin-card");
 const tosCheckbox = document.getElementById("tos-checkbox");
 const btnViewTos = document.getElementById("btn-view-tos");
 const welcomeCard = document.getElementById("welcome-card");
+const welcomeFirstName = document.getElementById("welcome-first-name");
+const welcomeLastName = document.getElementById("welcome-last-name");
+const welcomeDepartment = document.getElementById("welcome-department");
 const welcomeEmploymentStartDate = document.getElementById("welcome-employment-start-date");
 const welcomeIdfEligible = document.getElementById("welcome-idf-eligible");
 const welcomeIdfPercent = document.getElementById("welcome-idf-percent");
-const welcomeMigrateId = document.getElementById("welcome-migrate-id");
-const welcomeMigratePin = document.getElementById("welcome-migrate-pin");
 const welcomeError = document.getElementById("welcome-error");
 const btnWelcomeContinue = document.getElementById("btn-welcome-continue");
 
@@ -169,25 +173,23 @@ welcomeIdfEligible.addEventListener("change", () => {
 
 btnWelcomeContinue.addEventListener("click", async () => {
   welcomeError.textContent = "";
+
+  const firstName = welcomeFirstName.value.trim();
+  const lastName = welcomeLastName.value.trim();
+  const department = welcomeDepartment.value;
+  if (!firstName || !lastName || !department) {
+    welcomeError.textContent = "Please fill in your first name, last name, and department.";
+    return;
+  }
+
   btnWelcomeContinue.disabled = true;
   btnWelcomeContinue.textContent = "Setting up…";
   try {
     const idfBonusPercent = welcomeIdfEligible.checked ? Number(welcomeIdfPercent.value) : 0;
     const newState = defaultState(welcomeEmploymentStartDate.value, idfBonusPercent);
-
-    const migrateId = welcomeMigrateId.value.trim();
-    const migratePin = welcomeMigratePin.value.trim();
-    if (migrateId && migratePin) {
-      const oldData = await withTimeout(fetchUserData(migrateId), 10000, "timed out fetching old account");
-      if (!oldData || oldData.pin !== migratePin) {
-        welcomeError.textContent = "Couldn't find that old Work ID + PIN — check them, or leave both blank to skip.";
-        return;
-      }
-      // Bring over the real shift/spending history; keep the fresh settings just entered above.
-      newState.punches = oldData.punches || [];
-      newState.cafeteriaSpending = oldData.cafeteriaSpending || [];
-      newState.currentPunch = oldData.currentPunch || null;
-    }
+    newState.settings.firstName = firstName;
+    newState.settings.lastName = lastName;
+    newState.settings.department = department;
 
     await withTimeout(saveUserData(currentUid, newState), 10000, "timed out creating account");
     state = newState;

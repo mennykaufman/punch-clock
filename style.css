@@ -267,6 +267,41 @@ body {
   letter-spacing: 0.04em;
 }
 
+.settings-section {
+  padding: 0;
+  overflow: hidden;
+}
+
+.settings-section-header {
+  cursor: pointer;
+  list-style: none;
+  padding: 18px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+}
+
+.settings-section-header::-webkit-details-marker { display: none; }
+.settings-section-header::marker { content: ""; }
+
+.chevron {
+  transition: transform 0.2s ease;
+  font-size: 14px;
+}
+
+.settings-section[open] .chevron {
+  transform: rotate(180deg);
+}
+
+.settings-section-body {
+  padding: 0 20px 20px;
+}
+
 .status-card {
   text-align: center;
   background: var(--status-card-bg);

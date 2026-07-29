@@ -43,6 +43,15 @@
   <!-- Shown once, right after the very first Google sign-in for a brand new account -->
   <div class="card login-card" id="welcome-card" hidden>
     <p class="card-title">Welcome! A couple of one-time questions</p>
+    <label class="field-label" for="welcome-first-name">First name</label>
+    <input class="field-input" type="text" id="welcome-first-name" autocomplete="given-name" />
+    <label class="field-label" for="welcome-last-name">Last name</label>
+    <input class="field-input" type="text" id="welcome-last-name" autocomplete="family-name" />
+    <label class="field-label" for="welcome-department">Department</label>
+    <select class="field-input" id="welcome-department">
+      <option value="">Select department</option>
+      <option value="חוליה מיוחדת">חוליה מיוחדת</option>
+    </select>
     <label class="field-label" for="welcome-employment-start-date">Employment start date</label>
     <input class="field-input" type="date" id="welcome-employment-start-date" />
     <label class="switch-row">
@@ -53,9 +62,6 @@
       <option value="2">2%</option>
       <option value="3">3%</option>
     </select>
-    <label class="field-label" for="welcome-migrate-id">Migrating from an old Work ID? (optional)</label>
-    <input class="field-input" type="text" id="welcome-migrate-id" placeholder="Old Work ID" autocomplete="off" />
-    <input class="field-input" type="password" inputmode="numeric" id="welcome-migrate-pin" placeholder="Old PIN" autocomplete="off" />
     <p class="field-hint" id="welcome-error"></p>
     <button class="big-button" id="btn-welcome-continue" type="button">Continue</button>
   </div>
@@ -153,8 +159,9 @@
   <section class="screen" id="screen-settings" data-screen hidden>
 
     <!-- Employment & Pay -->
-    <div class="card">
-      <p class="card-title">Employment &amp; Pay</p>
+    <details class="card settings-section">
+      <summary class="settings-section-header"><span>Employment &amp; Pay</span><span class="chevron">▾</span></summary>
+      <div class="settings-section-body">
 
       <label class="field-label" for="settings-base-wage">Base hourly wage (₪)</label>
       <input class="field-input" type="number" min="0" step="0.1" id="settings-base-wage" />
@@ -180,11 +187,13 @@
 
       <label class="field-label" for="monthly-hours-goal">Monthly hours goal (optional)</label>
       <input class="field-input" type="number" min="0" id="monthly-hours-goal" placeholder="e.g. 186" />
-    </div>
+      </div>
+    </details>
 
     <!-- Shift & Tracking Options -->
-    <div class="card">
-      <p class="card-title">Shift &amp; Tracking Options</p>
+    <details class="card settings-section">
+      <summary class="settings-section-header"><span>Shift &amp; Tracking Options</span><span class="chevron">▾</span></summary>
+      <div class="settings-section-body">
       <div class="switch-row">
         <span>Track shift type / station</span>
         <label class="toggle-switch">
@@ -199,11 +208,13 @@
           <span class="toggle-slider"></span>
         </label>
       </div>
-    </div>
+      </div>
+    </details>
 
     <!-- Display & Customization -->
-    <div class="card">
-      <p class="card-title">Display &amp; Customization</p>
+    <details class="card settings-section">
+      <summary class="settings-section-header"><span>Display &amp; Customization</span><span class="chevron">▾</span></summary>
+      <div class="settings-section-body">
       <label class="field-label" for="theme-select">Dark Mode</label>
       <select class="field-input" id="theme-select">
         <option value="system">System Default</option>
@@ -218,15 +229,18 @@
       <div class="switch-row"><span>Averages</span><label class="toggle-switch"><input type="checkbox" id="more-widget-averages" /><span class="toggle-slider"></span></label></div>
       <div class="switch-row"><span>Luba points summary</span><label class="toggle-switch"><input type="checkbox" id="more-widget-luba" /><span class="toggle-slider"></span></label></div>
       <div class="switch-row"><span>Export buttons</span><label class="toggle-switch"><input type="checkbox" id="more-widget-export" /><span class="toggle-slider"></span></label></div>
-    </div>
+      </div>
+    </details>
 
     <!-- Account -->
-    <div class="card">
-      <p class="card-title">Account</p>
+    <details class="card settings-section">
+      <summary class="settings-section-header"><span>Account</span><span class="chevron">▾</span></summary>
+      <div class="settings-section-body">
       <p class="field-hint" id="signed-in-as"></p>
       <button class="secondary-button" id="btn-logout" type="button">Log out / Switch user</button>
       <button class="danger-link" id="btn-delete-account" type="button">Delete my account</button>
-    </div>
+      </div>
+    </details>
   </section>
 
 </main>
