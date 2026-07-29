@@ -1566,8 +1566,12 @@ function round2(n) {
 // each bonus. Bonuses are unwound in the same order calculatePay applies them
 // (base -> +10% פריון -> +IDF%) so each bonus's own ILS contribution is isolated.
 function computeMonthlyPayBreakdown(monthPunches) {
-  const rateBuckets = {}; // ratePercent -> { hours, amountILS } — amount uses each punch's OWN wage at
-                           // the time it was worked, so a later wage change never distorts past months.
+  // Keyed by a label (not just the raw percent) so the Shabbat 300% bucket can be
+  // split into its two CBA-mandated components — "200% Shabbat hours" + "100%
+  // weekly-rest addition" — without colliding with genuine 100%/200% day-rate
+  // buckets that might also appear in the same month.
+  const rateBuckets = {}; // key -> { label, sortRate, hours, amountILS } — amount uses each punch's
+                           // OWN wage at the time it was worked, so a later wage change never distorts past months.
   let totalPreBonus = 0;
   let totalProductivityAmount = 0;
   let totalIdfAmount = 0;
@@ -1581,9 +1585,22 @@ function computeMonthlyPayBreakdown(monthPunches) {
 
     const wage = pay.baseWageILS > 0 ? pay.baseWageILS : BASE_WAGE_ILS;
     for (const r of pay.hoursByRate) {
-      if (!rateBuckets[r.ratePercent]) rateBuckets[r.ratePercent] = { hours: 0, amountILS: 0 };
-      rateBuckets[r.ratePercent].hours += r.hours;
-      rateBuckets[r.ratePercent].amountILS += r.hours * wage * (r.ratePercent / 100);
+      if (r.ratePercent === 300) {
+        // Sorted to the end (past any real 100%-225% tiers) and kept adjacent to
+        // each other, Shabbat-hours first then rest-addition — matching the order
+        // the reference rate table itself presents these two components in.
+        if (!rateBuckets.shabbat200) rateBuckets.shabbat200 = { label: "Shabbat hours (200%)", sortRate: 300, hours: 0, amountILS: 0 };
+        if (!rateBuckets.rest100) rateBuckets.rest100 = { label: "Weekly rest addition (100%)", sortRate: 300.5, hours: 0, amountILS: 0 };
+        rateBuckets.shabbat200.hours += r.hours;
+        rateBuckets.shabbat200.amountILS += r.hours * wage * 2.0;
+        rateBuckets.rest100.hours += r.hours;
+        rateBuckets.rest100.amountILS += r.hours * wage * 1.0;
+      } else {
+        const key = `rate${r.ratePercent}`;
+        if (!rateBuckets[key]) rateBuckets[key] = { label: `Hours at ${r.ratePercent}%`, sortRate: r.ratePercent, hours: 0, amountILS: 0 };
+        rateBuckets[key].hours += r.hours;
+        rateBuckets[key].amountILS += r.hours * wage * (r.ratePercent / 100);
+      }
     }
 
     const base = pay.preBonusPayILS;
@@ -1598,13 +1615,14 @@ function computeMonthlyPayBreakdown(monthPunches) {
     if (pay.idfBonusPercent) idfPercentsUsed.add(pay.idfBonusPercent);
   }
 
-  const hoursByRate = Object.entries(rateBuckets)
-    .map(([rate, v]) => ({
-      ratePercent: Number(rate),
+  const hoursByRate = Object.values(rateBuckets)
+    .map((v) => ({
+      label: v.label,
+      sortRate: v.sortRate,
       hours: round2(v.hours),
       amountILS: round2(v.amountILS),
     }))
-    .sort((a, b) => a.ratePercent - b.ratePercent);
+    .sort((a, b) => a.sortRate - b.sortRate);
 
   return {
     hoursByRate,
@@ -1625,7 +1643,7 @@ function openMonthlyBreakdownModal(monthPunches, monthDate) {
     modalBody.innerHTML = `<p class="field-hint">No shifts this month.</p>`;
   } else {
     const b = computeMonthlyPayBreakdown(monthPunches);
-    const rateRows = b.hoursByRate.map((r) => [`Hours at ${r.ratePercent}%`, `${r.hours}h — ${formatILS(r.amountILS)}`]);
+    const rateRows = b.hoursByRate.map((r) => [r.label, `${r.hours}h — ${formatILS(r.amountILS)}`]);
     const idfLabel = b.idfPercentsUsed.size === 1
       ? `+${[...b.idfPercentsUsed][0]}% IDF bonus`
       : `IDF bonus`;
@@ -1656,7 +1674,18 @@ function openPayBreakdownModal(punch) {
     modalBody.innerHTML = `<p class="field-hint">Breakdown not available for this entry.</p>`;
   } else {
     // Only rates that actually applied to this shift show up — nothing at 0 hours.
-    const rateRows = pay.hoursByRate.map((r) => [`Hours at ${r.ratePercent}%`, `${r.hours}h`]);
+    // Shabbat's flat 300% is split into its two CBA-mandated components (200%
+    // Shabbat hours + 100% weekly-rest addition) for clarity — same hours, same
+    // total pay, just broken into the two lines a real payslip would show.
+    const rateRows = [];
+    for (const r of pay.hoursByRate) {
+      if (r.ratePercent === 300) {
+        rateRows.push([`Shabbat hours (200%)`, `${r.hours}h`]);
+        rateRows.push([`Weekly rest addition (100%)`, `${r.hours}h`]);
+      } else {
+        rateRows.push([`Hours at ${r.ratePercent}%`, `${r.hours}h`]);
+      }
+    }
     const rows = [
       ...rateRows,
       ["Before bonus", formatILS(pay.preBonusPayILS)],
