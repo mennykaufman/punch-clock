@@ -88,15 +88,18 @@ export async function saveUserData(employeeId, data) {
   await setDoc(userRef(employeeId), data);
 }
 
-// Permanently removes the account's data document and the Firebase Auth account
-// itself. deleteUser can throw "auth/requires-recent-login" if the session is
-// old — the caller should catch that specifically and ask the user to sign in
-// again before retrying, rather than treating it as a generic failure.
+// Permanently removes the Firebase Auth account first, then its Firestore data —
+// deliberately in that order. deleteUser can throw "auth/requires-recent-login" if
+// the session is old, and if that happens we must NOT have already deleted the
+// Firestore doc, or the account is left in a broken half-deleted state: data gone,
+// but the Auth account (and the ability to sign back into it) still very much alive.
+// The caller should catch that error specifically and ask the user to sign in again
+// before retrying, rather than treating it as a generic failure.
 export async function deleteUserAccount(employeeId) {
-  await deleteDoc(userRef(employeeId));
   if (auth.currentUser) {
     await deleteUser(auth.currentUser);
   }
+  await deleteDoc(userRef(employeeId));
 }
 
 // Fires immediately with the current data, then again whenever it changes on any device.
