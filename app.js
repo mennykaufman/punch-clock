@@ -1190,9 +1190,17 @@ function openUpdateScheduleModal() {
     parsedShifts = shifts;
     saveBtn.disabled = shifts.length === 0;
 
-    warning.textContent = skippedLines.length
-      ? `${skippedLines.length} line(s) couldn't be read and will be ignored.`
-      : "";
+    const pastedSomething = textarea.value.trim().length > 0;
+    if (pastedSomething && shifts.length === 0) {
+      warning.className = "field-error";
+      warning.textContent = "Couldn't recognize this format — check that you pasted the full SMS text without changes.";
+    } else if (skippedLines.length) {
+      warning.className = "field-hint";
+      warning.textContent = `${skippedLines.length} line(s) couldn't be read and will be ignored.`;
+    } else {
+      warning.className = "field-hint";
+      warning.textContent = "";
+    }
 
     preview.innerHTML = "";
     for (const s of shifts) {

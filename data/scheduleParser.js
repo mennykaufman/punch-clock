@@ -4,7 +4,23 @@
 // a 24h start-end range, then free-text role). The header line and any
 // unparseable text is reported back separately rather than silently dropped,
 // since this data becomes visible to colleagues once saved.
-const SHIFT_LINE_RE = /^(\d{1,2})\.(\d{1,2})\s+\S+\s*-\s*(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})\s+(.+)$/;
+const SHIFT_LINE_RE = /^(\d{1,2})[./](\d{1,2})\s+\S+\s*-\s*(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})\s+(.+)$/;
+
+// Phone SMS/WhatsApp copy-paste commonly carries invisible bidi control marks
+// (Hebrew text embeds LTR numbers/times), non-breaking spaces, and dash
+// characters other than a plain hyphen (en-dash, minus sign, Hebrew maqaf) —
+// none of that is visible to the user, so left unhandled it causes a silent
+// parse failure that looks like "the app is broken" rather than "fix the text".
+const BIDI_MARKS_RE = /[‎‏‪-‮⁦-⁩]/g;
+const NBSP_RE = / /g;
+const DASH_VARIANTS_RE = /[‐-―−־]/g;
+
+function normalizeLine(raw) {
+  return raw
+    .replace(BIDI_MARKS_RE, "")
+    .replace(NBSP_RE, " ")
+    .replace(DASH_VARIANTS_RE, "-");
+}
 
 export function parseDateOnlyLocal(dateISO) {
   const [y, m, d] = dateISO.split("-").map(Number);
@@ -26,7 +42,7 @@ export function parseScheduleSms(text, { now = new Date() } = {}) {
   const skippedLines = [];
 
   for (const raw of text.split(/\r?\n/)) {
-    const line = raw.trim();
+    const line = normalizeLine(raw.trim());
     if (!line) continue;
     const m = line.match(SHIFT_LINE_RE);
     if (!m) {

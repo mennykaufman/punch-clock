@@ -744,6 +744,13 @@ body {
   margin: 4px 0 0;
 }
 
+.field-error {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--danger);
+  margin: 4px 0 0;
+}
+
 .switch-row {
   display: flex;
   align-items: center;
