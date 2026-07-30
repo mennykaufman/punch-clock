@@ -1165,6 +1165,19 @@ setInterval(() => {
 function openUpdateScheduleModal() {
   openModal("Update your schedule");
 
+  if (!state.settings.firstName || !state.settings.lastName || !state.settings.department) {
+    const p = document.createElement("p");
+    p.className = "field-error";
+    p.textContent = "Please fill in your first name, last name, and department in Settings > Personal Info first.";
+    modalBody.appendChild(p);
+    const okBtn = document.createElement("button");
+    okBtn.className = "btn-primary";
+    okBtn.textContent = "OK";
+    okBtn.addEventListener("click", closeModal);
+    modalActions.appendChild(okBtn);
+    return;
+  }
+
   const hint = document.createElement("p");
   hint.className = "field-hint";
   hint.textContent = "Paste the weekly shift SMS you received below.";
@@ -1260,6 +1273,9 @@ function applyTheme() {
 }
 
 function renderSettings() {
+  document.getElementById("settings-first-name").value = state.settings.firstName || "";
+  document.getElementById("settings-last-name").value = state.settings.lastName || "";
+  document.getElementById("settings-department").value = state.settings.department || "";
   document.getElementById("settings-base-wage").value = state.settings.baseWageILS || BASE_WAGE_ILS;
   document.getElementById("remind-points-toggle").checked = !!state.settings.remindPointsOnClockOut;
   document.getElementById("track-shift-type-toggle").checked = !!state.settings.trackShiftType;
@@ -1302,6 +1318,22 @@ for (const key of ["hours", "shifts", "pay", "averages", "luba", "export"]) {
     saveState();
   });
 }
+
+document.getElementById("settings-first-name").addEventListener("change", (e) => {
+  state.settings.firstName = e.target.value.trim();
+  saveState();
+});
+
+document.getElementById("settings-last-name").addEventListener("change", (e) => {
+  state.settings.lastName = e.target.value.trim();
+  saveState();
+});
+
+document.getElementById("settings-department").addEventListener("change", (e) => {
+  state.settings.department = e.target.value;
+  saveState();
+  startDeptScheduleSync(state.settings.department);
+});
 
 document.getElementById("settings-base-wage").addEventListener("change", (e) => {
   const value = Number(e.target.value);
