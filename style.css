@@ -228,6 +228,38 @@ body {
   text-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
 }
 
+/* A small cloche/service-bell mark above the "O" in the TrackO'clock
+   wordmark, wherever the brand name appears — pure CSS shapes (dome +
+   base rim), sized in em so it scales with whatever font-size it's in. */
+.o-bell {
+  position: relative;
+  display: inline-block;
+}
+.o-bell::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: 100%;
+  transform: translateX(-50%);
+  margin-bottom: 0.16em;
+  width: 0.6em;
+  height: 0.32em;
+  background: #00E5FF;
+  border-radius: 0.5em 0.5em 0.06em 0.06em;
+}
+.o-bell::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: 100%;
+  transform: translateX(-50%);
+  margin-bottom: 0.08em;
+  width: 0.72em;
+  height: 0.07em;
+  background: #00E5FF;
+  border-radius: 2px;
+}
+
 .splash-tagline {
   margin: 6px 0 0;
   font-size: 15px;

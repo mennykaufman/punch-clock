@@ -338,7 +338,12 @@ function showScreen(name) {
   document.querySelectorAll(".nav-btn").forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.nav === name);
   });
-  document.getElementById("topbar-title").textContent = TITLES[name];
+  const topbarTitle = document.getElementById("topbar-title");
+  if (name === "home") {
+    topbarTitle.innerHTML = `Track<span class="o-bell">O</span>'clock`;
+  } else {
+    topbarTitle.textContent = TITLES[name];
+  }
   document.getElementById("topbar-subtitle").hidden = name !== "home";
   logAnalyticsEvent("screen_view", { firebase_screen: name });
   if (name === "history") renderHistory();
