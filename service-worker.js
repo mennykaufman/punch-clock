@@ -1,4 +1,4 @@
-const CACHE_NAME = "punchclock-v21";
+const CACHE_NAME = "punchclock-v22";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -7,6 +7,7 @@ const APP_SHELL = [
   "./data/shifts.js",
   "./data/payRules.js",
   "./data/cloud.js",
+  "./data/scheduleParser.js",
   "./manifest.json",
   "./icons/icon-192.png",
   "./icons/icon-512.png",

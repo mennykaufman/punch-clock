@@ -9,7 +9,10 @@ import {
   signOutUser,
   deleteUserAccount,
   logAnalyticsEvent,
+  saveMySchedule,
+  subscribeToDepartmentSchedules,
 } from "./data/cloud.js";
+import { parseScheduleSms } from "./data/scheduleParser.js";
 
 function defaultState(employmentStartDate = "", idfBonusPercent = 0) {
   return {
@@ -52,6 +55,9 @@ let currentUserLabel = ""; // email/name, for display only
 let state = null;
 let unsubscribeCloud = null;
 let applyingRemoteUpdate = false;
+let unsubscribeDeptSchedules = null;
+let colleagueSchedules = []; // every schedule doc (including our own) in the current department
+let deptSyncedFor = null;
 
 function saveState() {
   if (!currentUid) return;
@@ -140,6 +146,22 @@ function startCloudSync(uidKey) {
     renderCafeteria();
     renderSettings();
     applyingRemoteUpdate = false;
+    if (state.settings.department !== deptSyncedFor) startDeptScheduleSync(state.settings.department);
+  });
+}
+
+// Subscribes to every colleague's schedule doc in the given department so
+// "Who's On Clock" updates live as people paste/replace their weekly shifts.
+function startDeptScheduleSync(department) {
+  if (unsubscribeDeptSchedules) unsubscribeDeptSchedules();
+  deptSyncedFor = department;
+  if (!department) {
+    colleagueSchedules = [];
+    return;
+  }
+  unsubscribeDeptSchedules = subscribeToDepartmentSchedules(department, (docs) => {
+    colleagueSchedules = docs;
+    if (!document.getElementById("screen-whosonclock").hidden) renderWhosOnClock();
   });
 }
 
@@ -195,6 +217,7 @@ btnWelcomeContinue.addEventListener("click", async () => {
     state = newState;
     saveLocalCache(currentUid, state);
     startCloudSync(currentUid);
+    startDeptScheduleSync(state.settings.department);
     showAppShell();
     renderHome();
     logAnalyticsEvent("sign_up", { method: "google" });
@@ -216,6 +239,7 @@ async function handleAuthenticatedUser(user) {
       state = existing;
       saveLocalCache(currentUid, state);
       startCloudSync(currentUid);
+      startDeptScheduleSync(state.settings.department);
       showAppShell();
       renderHome();
       logAnalyticsEvent("login", { method: "google" });
@@ -231,6 +255,7 @@ async function handleAuthenticatedUser(user) {
     if (cached) {
       state = cached;
       startCloudSync(currentUid);
+      startDeptScheduleSync(state.settings.department);
       showAppShell();
       renderHome();
     } else {
@@ -243,6 +268,10 @@ async function handleAuthenticatedUser(user) {
 function handleLogout() {
   if (unsubscribeCloud) unsubscribeCloud();
   unsubscribeCloud = null;
+  if (unsubscribeDeptSchedules) unsubscribeDeptSchedules();
+  unsubscribeDeptSchedules = null;
+  colleagueSchedules = [];
+  deptSyncedFor = null;
   if (clockTimerInterval) {
     clearInterval(clockTimerInterval);
     clockTimerInterval = null;
@@ -299,8 +328,8 @@ function startOfWeek(date) {
 
 // ---------- navigation ----------
 
-const SCREENS = ["home", "history", "cafeteria", "settings"];
-const TITLES = { home: "TrackO'clock", history: "Monthly Attendance", cafeteria: "Luba", settings: "Settings" };
+const SCREENS = ["home", "history", "cafeteria", "whosonclock", "settings"];
+const TITLES = { home: "TrackO'clock", history: "Monthly Attendance", cafeteria: "Luba", whosonclock: "Who's On Clock", settings: "Settings" };
 
 function showScreen(name) {
   for (const s of SCREENS) {
@@ -314,6 +343,7 @@ function showScreen(name) {
   logAnalyticsEvent("screen_view", { firebase_screen: name });
   if (name === "history") renderHistory();
   if (name === "cafeteria") renderCafeteria();
+  if (name === "whosonclock") renderWhosOnClock();
   if (name === "settings") renderSettings();
 }
 
@@ -1038,6 +1068,173 @@ function openEditSpendingModal(entry) {
   modalActions.append(deleteBtn, cancelBtn, saveBtn);
 }
 
+// ---------- render: who's on clock ----------
+
+// "Has this user shared their own schedule for the current week?" is derived
+// straight from their shifts rather than a stored week-key: a paste always
+// replaces the whole array, so once none of it falls in the current week
+// anymore, this naturally (and correctly) re-locks them without any extra
+// state to keep in sync.
+function hasSharedCurrentWeek(shifts, now = new Date()) {
+  const weekStart = startOfWeek(now);
+  const weekEnd = new Date(weekStart.getTime() + 7 * 86400000);
+  return (shifts || []).some((s) => {
+    const d = new Date(s.dateISO);
+    return d >= weekStart && d < weekEnd;
+  });
+}
+
+function renderWhosOnClock() {
+  const lockedCard = document.getElementById("whosonclock-locked");
+  const content = document.getElementById("whosonclock-content");
+  const mine = colleagueSchedules.find((s) => s.uid === currentUid);
+
+  if (!mine || !hasSharedCurrentWeek(mine.shifts)) {
+    lockedCard.hidden = false;
+    content.hidden = true;
+    return;
+  }
+  lockedCard.hidden = true;
+  content.hidden = false;
+
+  const now = new Date();
+  const twoHoursFromNow = new Date(now.getTime() + 2 * 3600000);
+  const myActiveShift = (mine.shifts || []).find((s) => new Date(s.startISO) <= now && now < new Date(s.endISO));
+
+  const activeNow = [];
+  const comingUp = [];
+  for (const colleague of colleagueSchedules) {
+    if (colleague.uid === currentUid) continue;
+    for (const shift of colleague.shifts || []) {
+      const start = new Date(shift.startISO);
+      const end = new Date(shift.endISO);
+      if (start <= now && now < end) {
+        activeNow.push({ colleague, shift, start, end });
+      } else if (now < start && start <= twoHoursFromNow) {
+        comingUp.push({ colleague, shift, start, end });
+      }
+    }
+  }
+  activeNow.sort((a, b) => a.start - b.start);
+  comingUp.sort((a, b) => a.start - b.start);
+
+  const activeList = document.getElementById("woc-active-list");
+  const upcomingList = document.getElementById("woc-upcoming-list");
+  const divider = document.getElementById("woc-divider");
+  activeList.innerHTML = "";
+  upcomingList.innerHTML = "";
+
+  if (!activeNow.length && !comingUp.length) {
+    activeList.innerHTML = `<li class="list-empty">No colleagues on clock right now</li>`;
+  }
+
+  for (const { colleague, shift, start, end } of activeNow) {
+    const li = document.createElement("li");
+    li.className = "list-item woc-card woc-active";
+    const withYou = myActiveShift ? `<span class="woc-tag">· with you</span>` : "";
+    li.innerHTML = `
+      <div class="woc-name"><span class="woc-dot"></span>${colleague.displayName}${withYou}</div>
+      <p class="list-item-sub">${formatTime(start)} - ${formatTime(end)}${shift.role ? ` · ${shift.role}` : ""}</p>
+    `;
+    activeList.appendChild(li);
+  }
+
+  divider.hidden = !comingUp.length;
+  for (const { colleague, shift, start, end } of comingUp) {
+    const li = document.createElement("li");
+    li.className = "list-item woc-card woc-upcoming";
+    li.innerHTML = `
+      <div class="woc-name">${colleague.displayName}</div>
+      <p class="list-item-sub">${formatTime(start)} - ${formatTime(end)}${shift.role ? ` · ${shift.role}` : ""}</p>
+    `;
+    upcomingList.appendChild(li);
+  }
+}
+
+// Keeps Active Now / Coming Up fresh purely from the passage of time (no
+// Firestore write involved), mirroring the home screen's elapsed-time ticker.
+setInterval(() => {
+  if (!document.getElementById("screen-whosonclock").hidden) renderWhosOnClock();
+}, 60000);
+
+function openUpdateScheduleModal() {
+  openModal("Update your schedule");
+
+  const hint = document.createElement("p");
+  hint.className = "field-hint";
+  hint.textContent = "Paste the weekly shift SMS you received below.";
+
+  const textarea = document.createElement("textarea");
+  textarea.className = "field-input";
+  textarea.dir = "rtl";
+  textarea.rows = 8;
+  textarea.placeholder = "פורסם סידור עבודה במשמרות.קום! שיבוציך:\n2.8 א' - 10:00-18:00 מלווה נוסעים\n...";
+
+  const warning = document.createElement("p");
+  warning.className = "field-hint";
+
+  const preview = document.createElement("ul");
+  preview.className = "list";
+
+  modalBody.append(hint, textarea, warning, preview);
+
+  const saveBtn = document.createElement("button");
+  saveBtn.className = "btn-primary";
+  saveBtn.textContent = "Save";
+  saveBtn.disabled = true;
+
+  let parsedShifts = [];
+
+  textarea.addEventListener("input", () => {
+    const { shifts, skippedLines } = parseScheduleSms(textarea.value);
+    parsedShifts = shifts;
+    saveBtn.disabled = shifts.length === 0;
+
+    warning.textContent = skippedLines.length
+      ? `${skippedLines.length} line(s) couldn't be read and will be ignored.`
+      : "";
+
+    preview.innerHTML = "";
+    for (const s of shifts) {
+      const li = document.createElement("li");
+      li.className = "list-item";
+      li.innerHTML = `<div class="list-item-row"><span>${s.dateISO}</span><span>${formatTime(new Date(s.startISO))} - ${formatTime(new Date(s.endISO))}</span></div><p class="list-item-sub">${s.role}</p>`;
+      preview.appendChild(li);
+    }
+  });
+
+  saveBtn.addEventListener("click", async () => {
+    if (!parsedShifts.length) return;
+    saveBtn.disabled = true;
+    saveBtn.textContent = "Saving…";
+    try {
+      const displayName = `${state.settings.firstName} ${state.settings.lastName}`.trim();
+      await saveMySchedule(currentUid, {
+        displayName,
+        department: state.settings.department,
+        shifts: parsedShifts,
+      });
+      closeModal();
+      renderWhosOnClock();
+      logAnalyticsEvent("schedule_shared", { shift_count: parsedShifts.length });
+    } catch (err) {
+      console.error("schedule save failed:", err);
+      warning.textContent = "Couldn't save — check your connection and try again.";
+      saveBtn.disabled = false;
+      saveBtn.textContent = "Save";
+    }
+  });
+
+  const cancelBtn = document.createElement("button");
+  cancelBtn.className = "btn-plain";
+  cancelBtn.textContent = "Cancel";
+  cancelBtn.addEventListener("click", closeModal);
+
+  modalActions.append(cancelBtn, saveBtn);
+}
+
+document.getElementById("btn-update-schedule").addEventListener("click", openUpdateScheduleModal);
+
 // ---------- render: settings ----------
 
 function applyTheme() {
@@ -1167,6 +1364,10 @@ function openDeleteAccountModal() {
       localStorage.removeItem(localCacheKey(uidToDelete));
       if (unsubscribeCloud) unsubscribeCloud();
       unsubscribeCloud = null;
+      if (unsubscribeDeptSchedules) unsubscribeDeptSchedules();
+      unsubscribeDeptSchedules = null;
+      colleagueSchedules = [];
+      deptSyncedFor = null;
       if (clockTimerInterval) {
         clearInterval(clockTimerInterval);
         clockTimerInterval = null;

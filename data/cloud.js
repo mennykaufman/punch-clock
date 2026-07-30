@@ -6,6 +6,9 @@ import {
   setDoc,
   deleteDoc,
   onSnapshot,
+  collection,
+  query,
+  where,
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 import {
   getAuth,
@@ -107,4 +110,28 @@ export function subscribeToUserData(employeeId, onData) {
   return onSnapshot(userRef(employeeId), (snap) => {
     if (snap.exists()) onData(snap.data());
   });
+}
+
+function scheduleRef(uidKey) {
+  return doc(db, "schedules", uidKey);
+}
+
+// A paste always replaces the whole week's shifts (never merges), so there's
+// no partial-update ambiguity, and a colleague who stops sharing simply ages
+// out once none of their stored shifts fall in the current week anymore.
+export async function saveMySchedule(uidKey, { displayName, department, shifts }) {
+  await setDoc(scheduleRef(uidKey), {
+    uid: uidKey,
+    displayName,
+    department,
+    updatedAt: new Date().toISOString(),
+    shifts,
+  });
+}
+
+// Fires immediately with every colleague's schedule doc in the same department,
+// then again whenever any of them updates theirs — mirrors subscribeToUserData.
+export function subscribeToDepartmentSchedules(department, onData) {
+  const q = query(collection(db, "schedules"), where("department", "==", department));
+  return onSnapshot(q, (snap) => onData(snap.docs.map((d) => d.data())));
 }

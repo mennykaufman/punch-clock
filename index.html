@@ -155,6 +155,22 @@
     <ul class="list" id="cafeteria-list"></ul>
   </section>
 
+  <!-- WHO'S ON CLOCK -->
+  <section class="screen" id="screen-whosonclock" data-screen hidden>
+    <div class="card" id="whosonclock-locked" hidden>
+      <p class="card-title">Share your schedule to see who's on clock</p>
+      <p class="field-hint">Paste your weekly shift SMS below to unlock this screen.</p>
+    </div>
+
+    <div id="whosonclock-content" hidden>
+      <ul class="list woc-list" id="woc-active-list"></ul>
+      <div class="woc-divider" id="woc-divider" hidden><span>Coming up</span></div>
+      <ul class="list woc-list" id="woc-upcoming-list"></ul>
+    </div>
+
+    <button class="big-button" id="btn-update-schedule" type="button">Update / paste schedule</button>
+  </section>
+
   <!-- SETTINGS -->
   <section class="screen" id="screen-settings" data-screen hidden>
 
@@ -257,6 +273,10 @@
   <button class="nav-btn" data-nav="cafeteria" type="button">
     <img class="nav-icon nav-icon-avatar" src="icons/luba-face.jpg" alt="" />
     <span>Luba</span>
+  </button>
+  <button class="nav-btn" data-nav="whosonclock" type="button">
+    <span class="nav-icon nav-icon-emoji">🫂</span>
+    <span>Who's On Clock</span>
   </button>
   <button class="nav-btn" data-nav="settings" type="button">
     <span class="nav-icon nav-icon-emoji">⚙️</span>
