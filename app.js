@@ -505,6 +505,7 @@ async function handleAuthenticatedUser(user) {
         state.settings.email = currentUserEmail;
         saveState();
       }
+      migratePunchPayCalculations();
       saveLocalCache(currentUid, state);
       startCloudSync(currentUid);
       startDeptScheduleSync(state.settings.department);
@@ -532,6 +533,7 @@ async function handleAuthenticatedUser(user) {
     }
     if (cached) {
       state = cached;
+      migratePunchPayCalculations();
       startCloudSync(currentUid);
       startDeptScheduleSync(state.settings.department);
       startFeatureFlagsSync();
@@ -900,6 +902,32 @@ function currentProductivityBonusEnabled(referenceDate = new Date()) {
   const override = state.settings.productivityBonusOverride;
   if (override === true || override === false) return override;
   return isProductivityBonusEligible(state.settings.employmentStartDate, referenceDate);
+}
+
+// Every existing punch has its pay FROZEN in payBreakdown/payILS from whenever it was
+// originally saved — which, for anyone's real history, means it's still using the old
+// formula (7h/420min night cap, no break deduction, +10% baked in per shift) from
+// before this was corrected against real payslips. New shifts already use the fixed
+// calculatePay(); this re-runs it once over every existing punch (same clock times,
+// same wage/IDF-% each shift already had) so past months stop showing stale numbers
+// too. Gated by a flag so it only ever runs once per account, not on every load.
+function migratePunchPayCalculations() {
+  if (state.settings.payRulesMigrationV2 || !state.punches.length) {
+    if (!state.settings.payRulesMigrationV2) state.settings.payRulesMigrationV2 = true;
+    return;
+  }
+  for (const p of state.punches) {
+    const old = p.payBreakdown;
+    if (!old) continue;
+    const recalculated = calculatePay(new Date(p.clockInISO), new Date(p.clockOutISO), {
+      baseWageILS: old.baseWageILS,
+      idfBonusPercent: old.idfBonusPercent || 0,
+    });
+    p.payBreakdown = recalculated;
+    p.payILS = recalculated.finalPayILS;
+  }
+  state.settings.payRulesMigrationV2 = true;
+  saveState();
 }
 
 // The +10% seniority bonus for a given payslip month is a lump sum based on hours
@@ -2562,19 +2590,19 @@ function openMonthlyBreakdownModal(monthPunches, monthDate) {
 
   const calcBtn = document.createElement("button");
   calcBtn.className = "btn-plain";
-  calcBtn.textContent = "🧮 Salary Calculator";
+  calcBtn.textContent = "🧮 Salary Simulator";
   calcBtn.addEventListener("click", () => {
     closeModal();
-    openSalaryCalculatorModal();
+    openSalarySimulatorModal();
   });
 
   modalActions.append(closeBtn, calcBtn);
 }
 
-// ---------- salary calculator (shift simulator + rules explainer) ----------
+// ---------- salary simulator (shift simulator + rules explainer) ----------
 
-function openSalaryCalculatorModal(initialTab = "simulator") {
-  openModal("🧮 Salary Calculator");
+function openSalarySimulatorModal(initialTab = "simulator") {
+  openModal("🧮 Salary Simulator");
 
   const tabBar = document.createElement("div");
   tabBar.className = "segmented-control";
