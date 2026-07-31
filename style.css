@@ -456,12 +456,21 @@ body {
   transition: all 0.3s ease;
 }
 
+#screen-settings {
+  /* Reserves room so scrolled-to content is never covered by the fixed
+     save bar below (in addition to the bottom-nav clearance body already has). */
+  padding-bottom: 84px;
+}
+
 .settings-save-bar {
-  position: sticky;
+  position: fixed;
+  left: 0;
+  right: 0;
   bottom: calc(64px + env(safe-area-inset-bottom));
   background: var(--bg-main);
-  padding-top: 10px;
-  margin-top: 8px;
+  border-top: 1px solid var(--card-border);
+  padding: 10px 16px;
+  z-index: 10;
 }
 
 .settings-save-bar .field-hint {
@@ -761,6 +770,8 @@ body {
   color: var(--text-secondary);
 }
 
+.woc-divider[hidden] { display: none; }
+
 .woc-divider::before,
 .woc-divider::after {
   content: "";
@@ -924,6 +935,7 @@ body {
 }
 
 .nav-btn.active { color: var(--accent-cyan); }
+.nav-btn[hidden] { display: none; }
 
 .nav-icon {
   width: 22px;
@@ -968,6 +980,7 @@ body {
 
 .nav-badge-beta.role-beta { background: var(--accent-cyan); }
 .nav-badge-beta.role-admin { background: linear-gradient(135deg, #B8860B, #6B21A8); }
+.nav-badge-beta[hidden] { display: none; }
 
 .role-badge-inline {
   display: inline-block;
@@ -983,6 +996,7 @@ body {
 
 .role-badge-inline.role-beta { background: var(--accent-cyan); color: var(--btn-primary-text); }
 .role-badge-inline.role-admin { background: linear-gradient(135deg, #B8860B, #6B21A8); }
+.role-badge-inline[hidden] { display: none; }
 
 .modal-backdrop {
   position: fixed;
