@@ -298,6 +298,14 @@
 
       <p class="field-label">User Management</p>
       <p class="field-hint">Change a user's role, or deactivate someone who left.</p>
+      <input class="field-input" type="text" id="admin-user-search" placeholder="Search by name, email, or role…" />
+      <div class="switch-row">
+        <span>Show inactive/blocked users</span>
+        <label class="toggle-switch">
+          <input type="checkbox" id="admin-show-inactive-toggle" />
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
       <ul class="list" id="admin-user-list"></ul>
 
       <p class="field-label" style="margin-top:16px;">Feature Flags</p>
@@ -308,7 +316,7 @@
       </div>
     </details>
 
-    <div class="settings-save-bar">
+    <div class="settings-save-bar" id="settings-save-bar" hidden>
       <p class="field-hint" id="settings-saved-hint"></p>
       <button class="big-button" id="btn-save-all-settings" type="button">Save Changes</button>
     </div>

@@ -152,9 +152,15 @@ export async function updateUserRole(uid, role) {
   await updateDoc(doc(db, "users", uid), { "settings.role": role });
 }
 
-// Admin-only: freezes/unfreezes a user's ability to sign in at all.
+// Admin-only: freezes/unfreezes a user's ability to sign in at all. Also
+// denormalizes the flag onto that user's schedule doc (merge, so it's created
+// even if they never pasted a schedule) — a plain user's Firestore rules only
+// let them read schedule docs in their own department, not the users
+// collection, so this is how Who's In can filter out a deactivated colleague
+// without needing broader read access.
 export async function setUserActive(uid, active) {
   await updateDoc(doc(db, "users", uid), { "settings.active": active });
+  await setDoc(doc(db, "schedules", uid), { active }, { merge: true });
 }
 
 function featureFlagsRef() {

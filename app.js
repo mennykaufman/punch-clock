@@ -59,6 +59,7 @@ function saveLocalCache(uidKey, data) {
 
 let currentUid = null; // the signed-in Google account's uid — the Firestore document key
 let currentUserLabel = ""; // email/name, for display only
+let currentUserEmail = ""; // just the email (or "" if unavailable) — stored on the user doc so admin search can find people by it
 let state = null;
 let unsubscribeCloud = null;
 let applyingRemoteUpdate = false;
@@ -260,79 +261,111 @@ function applyRoleVisibility() {
 
 // Admin-only panel: lets an admin change any registered user's role directly
 // from the app instead of editing Firestore documents by hand.
+let adminUsersCache = [];
+
 async function renderAdminUserList() {
   const list = document.getElementById("admin-user-list");
   list.innerHTML = `<li class="list-empty">Loading…</li>`;
   try {
-    const users = await fetchAllUsers();
-    list.innerHTML = "";
-    if (!users.length) {
-      list.innerHTML = `<li class="list-empty">No users found</li>`;
-      return;
-    }
-    for (const u of users) {
-      const name = `${u.settings?.firstName || ""} ${u.settings?.lastName || ""}`.trim() || u.uid;
-      const role = u.settings?.role || "user";
-      const active = u.settings?.active !== false;
-
-      const li = document.createElement("li");
-      li.className = "list-item";
-
-      const nameP = document.createElement("p");
-      nameP.className = "list-item-title";
-      nameP.textContent = active ? name : `${name} (inactive)`;
-
-      const select = document.createElement("select");
-      select.className = "field-input";
-      select.innerHTML = `<option value="user">user</option><option value="beta">beta</option><option value="admin">admin</option>`;
-      select.value = role;
-      select.addEventListener("change", async () => {
-        select.disabled = true;
-        try {
-          await updateUserRole(u.uid, select.value);
-        } catch (err) {
-          console.error("role update failed:", err);
-          select.value = role;
-        } finally {
-          select.disabled = false;
-        }
-      });
-
-      if (u.uid === currentUid) {
-        // Never let an admin deactivate their own account from here — with
-        // no other admin around, that's an unrecoverable self-lockout
-        // (the only fix would be editing Firestore by hand).
-        const youTag = document.createElement("span");
-        youTag.className = "field-hint";
-        youTag.textContent = "(you)";
-        li.append(nameP, select, youTag);
-        list.appendChild(li);
-        continue;
-      }
-
-      const activeBtn = document.createElement("button");
-      activeBtn.className = active ? "danger-link" : "secondary-button";
-      activeBtn.type = "button";
-      activeBtn.textContent = active ? "Deactivate" : "Reactivate";
-      activeBtn.addEventListener("click", async () => {
-        activeBtn.disabled = true;
-        try {
-          await setUserActive(u.uid, !active);
-          renderAdminUserList();
-        } catch (err) {
-          console.error("active toggle failed:", err);
-          activeBtn.disabled = false;
-        }
-      });
-
-      li.append(nameP, select, activeBtn);
-      list.appendChild(li);
-    }
+    adminUsersCache = await fetchAllUsers();
+    renderFilteredAdminUserList();
   } catch (err) {
     console.error("failed to load users:", err);
     list.innerHTML = `<li class="list-empty">Couldn't load users</li>`;
   }
 }
+
+// Re-filters the already-fetched user list against the search box and the
+// "show inactive" toggle — no network round-trip, so it can run on every
+// keystroke.
+function renderFilteredAdminUserList() {
+  const list = document.getElementById("admin-user-list");
+  const searchTerm = document.getElementById("admin-user-search").value.trim().toLowerCase();
+  const showInactive = document.getElementById("admin-show-inactive-toggle").checked;
+
+  if (!adminUsersCache.length) {
+    list.innerHTML = `<li class="list-empty">No users found</li>`;
+    return;
+  }
+
+  const filtered = adminUsersCache.filter((u) => {
+    const active = u.settings?.active !== false;
+    if (!active && !showInactive) return false;
+    if (!searchTerm) return true;
+    const name = `${u.settings?.firstName || ""} ${u.settings?.lastName || ""}`.trim().toLowerCase();
+    const email = (u.settings?.email || "").toLowerCase();
+    const role = (u.settings?.role || "user").toLowerCase();
+    return name.includes(searchTerm) || email.includes(searchTerm) || role.includes(searchTerm);
+  });
+
+  list.innerHTML = "";
+  if (!filtered.length) {
+    list.innerHTML = `<li class="list-empty">No users match your search</li>`;
+    return;
+  }
+
+  for (const u of filtered) {
+    const name = `${u.settings?.firstName || ""} ${u.settings?.lastName || ""}`.trim() || u.uid;
+    const role = u.settings?.role || "user";
+    const active = u.settings?.active !== false;
+
+    const li = document.createElement("li");
+    li.className = "list-item";
+
+    const nameP = document.createElement("p");
+    nameP.className = "list-item-title";
+    nameP.textContent = active ? name : `${name} (inactive)`;
+
+    const select = document.createElement("select");
+    select.className = "field-input";
+    select.innerHTML = `<option value="user">user</option><option value="beta">beta</option><option value="admin">admin</option>`;
+    select.value = role;
+    select.addEventListener("change", async () => {
+      select.disabled = true;
+      try {
+        await updateUserRole(u.uid, select.value);
+      } catch (err) {
+        console.error("role update failed:", err);
+        select.value = role;
+      } finally {
+        select.disabled = false;
+      }
+    });
+
+    if (u.uid === currentUid) {
+      // Never let an admin deactivate their own account from here — with
+      // no other admin around, that's an unrecoverable self-lockout
+      // (the only fix would be editing Firestore by hand).
+      const youTag = document.createElement("span");
+      youTag.className = "field-hint";
+      youTag.textContent = "(you)";
+      li.append(nameP, select, youTag);
+      list.appendChild(li);
+      continue;
+    }
+
+    const activeBtn = document.createElement("button");
+    activeBtn.className = active ? "danger-link" : "secondary-button";
+    activeBtn.type = "button";
+    activeBtn.textContent = active ? "Deactivate" : "Reactivate";
+    activeBtn.addEventListener("click", async () => {
+      activeBtn.disabled = true;
+      try {
+        await setUserActive(u.uid, !active);
+        renderAdminUserList();
+      } catch (err) {
+        console.error("active toggle failed:", err);
+        activeBtn.disabled = false;
+      }
+    });
+
+    li.append(nameP, select, activeBtn);
+    list.appendChild(li);
+  }
+}
+
+document.getElementById("admin-user-search").addEventListener("input", renderFilteredAdminUserList);
+document.getElementById("admin-show-inactive-toggle").addEventListener("change", renderFilteredAdminUserList);
 
 // Admin-only panel: toggles which role tiers can currently see each
 // experimental feature. Starting point for any future feature — new ones
@@ -432,6 +465,7 @@ btnWelcomeContinue.addEventListener("click", async () => {
     newState.settings.firstName = firstName;
     newState.settings.lastName = lastName;
     newState.settings.department = department;
+    newState.settings.email = currentUserEmail;
 
     await withTimeout(saveUserData(currentUid, newState), 10000, "timed out creating account");
     state = newState;
@@ -456,6 +490,7 @@ btnWelcomeContinue.addEventListener("click", async () => {
 async function handleAuthenticatedUser(user) {
   currentUid = user.uid;
   currentUserLabel = user.email || user.displayName || user.uid;
+  currentUserEmail = user.email || "";
   try {
     const existing = await withTimeout(fetchUserData(user.uid), 10000, "timed out fetching account");
     if (existing?.settings?.active === false) {
@@ -464,6 +499,12 @@ async function handleAuthenticatedUser(user) {
     }
     if (existing) {
       state = existing;
+      // Backfill for accounts created before email was stored on the doc — lets
+      // the admin search panel find them by email too, going forward.
+      if (!state.settings.email && currentUserEmail) {
+        state.settings.email = currentUserEmail;
+        saveState();
+      }
       saveLocalCache(currentUid, state);
       startCloudSync(currentUid);
       startDeptScheduleSync(state.settings.department);
@@ -584,7 +625,10 @@ function showScreen(name) {
   if (name === "history") renderHistory();
   if (name === "cafeteria") renderCafeteria();
   if (name === "whosonclock") renderWhosOnClock();
-  if (name === "settings") renderSettings();
+  if (name === "settings") {
+    renderSettings();
+    hideSettingsSaveBar();
+  }
 }
 
 document.querySelectorAll(".nav-btn").forEach((btn) => {
@@ -1358,6 +1402,7 @@ function renderWhosOnClock() {
   let comingUp = [];
   for (const colleague of colleagueSchedules) {
     if (colleague.uid === currentUid) continue;
+    if (colleague.active === false) continue; // deactivated by an admin — hide immediately
     for (const shift of colleague.shifts || []) {
       const start = new Date(shift.startISO);
       const end = new Date(shift.endISO);
@@ -1751,6 +1796,18 @@ function applyTheme() {
   }
 }
 
+// The floating save bar starts hidden and only appears once the user actually
+// touches a field — it isn't part of renderSettings() itself since several
+// field handlers below call renderSettings() to refresh a derived hint right
+// after marking things dirty, and that must not immediately hide the bar again.
+function markSettingsDirty() {
+  document.getElementById("settings-save-bar").hidden = false;
+}
+
+function hideSettingsSaveBar() {
+  document.getElementById("settings-save-bar").hidden = true;
+}
+
 function renderSettings() {
   document.getElementById("settings-first-name").value = state.settings.firstName || "";
   document.getElementById("settings-last-name").value = state.settings.lastName || "";
@@ -1801,61 +1858,73 @@ for (const key of ["hours", "shifts", "pay", "averages", "luba", "export"]) {
   document.getElementById(`more-widget-${key}`).addEventListener("change", (e) => {
     if (!state.settings.moreWidgets) state.settings.moreWidgets = {};
     state.settings.moreWidgets[key] = e.target.checked;
+    markSettingsDirty();
   });
 }
 
 document.getElementById("settings-first-name").addEventListener("change", (e) => {
   state.settings.firstName = e.target.value.trim();
+  markSettingsDirty();
 });
 
 document.getElementById("settings-last-name").addEventListener("change", (e) => {
   state.settings.lastName = e.target.value.trim();
+  markSettingsDirty();
 });
 
 document.getElementById("settings-department").addEventListener("change", (e) => {
   state.settings.department = e.target.value;
   startDeptScheduleSync(state.settings.department);
+  markSettingsDirty();
 });
 
 document.getElementById("settings-base-wage").addEventListener("change", (e) => {
   const value = Number(e.target.value);
   state.settings.baseWageILS = value > 0 ? value : BASE_WAGE_ILS;
   renderSettings();
+  markSettingsDirty();
 });
 
 document.getElementById("settings-employment-start-date").addEventListener("change", (e) => {
   state.settings.employmentStartDate = e.target.value;
   renderSettings();
+  markSettingsDirty();
 });
 
 document.querySelectorAll("#idf-bonus-segmented .segmented-option").forEach((btn) => {
   btn.addEventListener("click", () => {
     state.settings.idfBonusPercent = Number(btn.dataset.value);
     renderSettings();
+    markSettingsDirty();
   });
 });
 
 document.getElementById("settings-seniority-toggle").addEventListener("change", (e) => {
   state.settings.productivityBonusOverride = e.target.checked;
   renderSettings();
+  markSettingsDirty();
 });
 
 document.getElementById("monthly-hours-goal").addEventListener("change", (e) => {
   state.settings.monthlyHoursGoal = Number(e.target.value) || 0;
+  markSettingsDirty();
 });
 
 document.getElementById("remind-points-toggle").addEventListener("change", (e) => {
   state.settings.remindPointsOnClockOut = e.target.checked;
+  markSettingsDirty();
 });
 
 document.getElementById("track-shift-type-toggle").addEventListener("change", (e) => {
   state.settings.trackShiftType = e.target.checked;
   renderHistory();
+  markSettingsDirty();
 });
 
 document.getElementById("theme-select").addEventListener("change", (e) => {
   state.settings.theme = e.target.value;
   applyTheme();
+  markSettingsDirty();
 });
 
 // One global save for the whole Settings screen — every field above only
@@ -1864,6 +1933,7 @@ document.getElementById("theme-select").addEventListener("change", (e) => {
 // saving itself the moment you touch it.
 document.getElementById("btn-save-all-settings").addEventListener("click", () => {
   saveState();
+  hideSettingsSaveBar();
   const hint = document.getElementById("settings-saved-hint");
   hint.textContent = "Saved ✓";
   setTimeout(() => { hint.textContent = ""; }, 2000);

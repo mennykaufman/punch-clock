@@ -473,6 +473,8 @@ body {
   z-index: 10;
 }
 
+.settings-save-bar[hidden] { display: none; }
+
 .settings-save-bar .field-hint {
   text-align: center;
   min-height: 18px;
