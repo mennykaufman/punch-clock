@@ -3,7 +3,9 @@ import {
   getFirestore,
   doc,
   getDoc,
+  getDocs,
   setDoc,
+  updateDoc,
   deleteDoc,
   onSnapshot,
   collection,
@@ -134,4 +136,18 @@ export async function saveMySchedule(uidKey, { displayName, department, shifts }
 export function subscribeToDepartmentSchedules(department, onData) {
   const q = query(collection(db, "schedules"), where("department", "==", department));
   return onSnapshot(q, (snap) => onData(snap.docs.map((d) => d.data())));
+}
+
+// Admin-only: lists every registered user (for the in-app role-management panel).
+export async function fetchAllUsers() {
+  const snap = await getDocs(collection(db, "users"));
+  return snap.docs.map((d) => ({ uid: d.id, ...d.data() }));
+}
+
+// A scoped field update (not setDoc) — an admin changing someone else's role
+// must never touch the rest of that person's document, which they don't have
+// loaded locally. Firestore rules separately enforce that only an admin's own
+// uid may write to a document that isn't their own.
+export async function updateUserRole(uid, role) {
+  await updateDoc(doc(db, "users", uid), { "settings.role": role });
 }

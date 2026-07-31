@@ -169,6 +169,7 @@
     </div>
 
     <button class="big-button" id="btn-update-schedule" type="button">Update / paste schedule</button>
+    <button class="secondary-button" id="btn-invite-friends" type="button">Invite friends</button>
   </section>
 
   <!-- SETTINGS -->
@@ -278,6 +279,15 @@
       <p class="field-hint" id="signed-in-as"></p>
       <button class="secondary-button" id="btn-logout" type="button">Log out / Switch user</button>
       <button class="danger-link" id="btn-delete-account" type="button">Delete my account</button>
+      </div>
+    </details>
+
+    <!-- Admin Settings (admins only) -->
+    <details class="card settings-section" id="admin-settings-section" hidden>
+      <summary class="settings-section-header"><span>Admin Settings</span><span class="chevron">▾</span></summary>
+      <div class="settings-section-body">
+      <p class="field-hint">Change any user's role.</p>
+      <ul class="list" id="admin-user-list"></ul>
       </div>
     </details>
   </section>

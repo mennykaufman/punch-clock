@@ -11,6 +11,8 @@ import {
   logAnalyticsEvent,
   saveMySchedule,
   subscribeToDepartmentSchedules,
+  fetchAllUsers,
+  updateUserRole,
 } from "./data/cloud.js";
 import { parseScheduleSms } from "./data/scheduleParser.js";
 
@@ -174,6 +176,54 @@ function applyRoleVisibility() {
   const canSeeWhosOnClock = role === "beta" || role === "admin";
   document.querySelector('[data-nav="whosonclock"]').hidden = !canSeeWhosOnClock;
   document.getElementById("nav-beta-badge").hidden = role !== "beta";
+}
+
+// Admin-only panel: lets an admin change any registered user's role directly
+// from the app instead of editing Firestore documents by hand.
+async function renderAdminUserList() {
+  const list = document.getElementById("admin-user-list");
+  list.innerHTML = `<li class="list-empty">Loading…</li>`;
+  try {
+    const users = await fetchAllUsers();
+    list.innerHTML = "";
+    if (!users.length) {
+      list.innerHTML = `<li class="list-empty">No users found</li>`;
+      return;
+    }
+    for (const u of users) {
+      const name = `${u.settings?.firstName || ""} ${u.settings?.lastName || ""}`.trim() || u.uid;
+      const role = u.settings?.role || "user";
+
+      const li = document.createElement("li");
+      li.className = "list-item";
+
+      const nameP = document.createElement("p");
+      nameP.className = "list-item-title";
+      nameP.textContent = name;
+
+      const select = document.createElement("select");
+      select.className = "field-input";
+      select.innerHTML = `<option value="user">user</option><option value="beta">beta</option><option value="admin">admin</option>`;
+      select.value = role;
+      select.addEventListener("change", async () => {
+        select.disabled = true;
+        try {
+          await updateUserRole(u.uid, select.value);
+        } catch (err) {
+          console.error("role update failed:", err);
+          select.value = role;
+        } finally {
+          select.disabled = false;
+        }
+      });
+
+      li.append(nameP, select);
+      list.appendChild(li);
+    }
+  } catch (err) {
+    console.error("failed to load users:", err);
+    list.innerHTML = `<li class="list-empty">Couldn't load users</li>`;
+  }
 }
 
 tosCheckbox.addEventListener("change", () => {
@@ -1306,6 +1356,57 @@ function showScheduleSavedConfirmation(shifts) {
 
 document.getElementById("btn-update-schedule").addEventListener("click", openUpdateScheduleModal);
 
+const APP_URL = "https://mennykaufman.github.io/punch-clock/";
+const APP_LOGO_URL = `${APP_URL}icons/icon-192.png`;
+
+function openInviteModal() {
+  openModal("Invite friends");
+
+  const qrUrl = `https://quickchart.io/qr?text=${encodeURIComponent(APP_URL)}&centerImageUrl=${encodeURIComponent(APP_LOGO_URL)}&centerImageSizeRatio=0.25&ecLevel=H&size=260&margin=1`;
+  const img = document.createElement("img");
+  img.src = qrUrl;
+  img.alt = "QR code linking to TrackO'clock";
+  img.style.cssText = "width:100%;max-width:260px;display:block;margin:0 auto 12px;border-radius:12px;";
+
+  const linkP = document.createElement("p");
+  linkP.className = "field-hint";
+  linkP.style.cssText = "text-align:center;word-break:break-all;";
+  linkP.textContent = APP_URL;
+
+  modalBody.append(img, linkP);
+
+  const shareBtn = document.createElement("button");
+  shareBtn.className = "btn-primary";
+  const canNativeShare = typeof navigator.share === "function";
+  shareBtn.textContent = canNativeShare ? "Share" : "Copy link";
+  shareBtn.addEventListener("click", async () => {
+    if (canNativeShare) {
+      try {
+        await navigator.share({ title: "TrackO'clock", text: "Join me on TrackO'clock", url: APP_URL });
+      } catch (err) {
+        // User closed the native share sheet without picking anything — not an error.
+      }
+    } else {
+      try {
+        await navigator.clipboard.writeText(APP_URL);
+        shareBtn.textContent = "Copied ✓";
+        setTimeout(() => { shareBtn.textContent = "Copy link"; }, 1500);
+      } catch (err) {
+        console.error("clipboard write failed:", err);
+      }
+    }
+  });
+
+  const closeBtn = document.createElement("button");
+  closeBtn.className = "btn-plain";
+  closeBtn.textContent = "Close";
+  closeBtn.addEventListener("click", closeModal);
+
+  modalActions.append(closeBtn, shareBtn);
+}
+
+document.getElementById("btn-invite-friends").addEventListener("click", openInviteModal);
+
 // ---------- render: settings ----------
 
 function applyTheme() {
@@ -1328,6 +1429,10 @@ function renderSettings() {
   document.getElementById("theme-select").value = state.settings.theme || "system";
   document.getElementById("monthly-hours-goal").value = state.settings.monthlyHoursGoal || "";
   document.getElementById("signed-in-as").textContent = currentUid ? `Signed in as: ${currentUserLabel}` : "";
+
+  const isAdmin = (state.settings.role || "user") === "admin";
+  document.getElementById("admin-settings-section").hidden = !isAdmin;
+  if (isAdmin) renderAdminUserList();
 
   document.getElementById("settings-employment-start-date").value = state.settings.employmentStartDate || "";
 
