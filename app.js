@@ -121,6 +121,7 @@ function showLoginScreen() {
   splashScreen.hidden = true;
   loginScreen.hidden = false;
   appShell.hidden = true;
+  document.getElementById("deactivated-screen").hidden = true;
   googleSignInCard.hidden = false;
   welcomeCard.hidden = true;
 }
@@ -128,6 +129,8 @@ function showLoginScreen() {
 function showWelcomeCard() {
   splashScreen.hidden = true;
   loginScreen.hidden = false;
+  appShell.hidden = true;
+  document.getElementById("deactivated-screen").hidden = true;
   googleSignInCard.hidden = true;
   welcomeCard.hidden = false;
 }
@@ -136,6 +139,7 @@ function showAppShell() {
   splashScreen.hidden = true;
   loginScreen.hidden = true;
   appShell.hidden = false;
+  document.getElementById("deactivated-screen").hidden = true;
 }
 
 function showDeactivatedScreen() {
@@ -266,6 +270,18 @@ async function renderAdminUserList() {
           select.disabled = false;
         }
       });
+
+      if (u.uid === currentUid) {
+        // Never let an admin deactivate their own account from here — with
+        // no other admin around, that's an unrecoverable self-lockout
+        // (the only fix would be editing Firestore by hand).
+        const youTag = document.createElement("span");
+        youTag.className = "field-hint";
+        youTag.textContent = "(you)";
+        li.append(nameP, select, youTag);
+        list.appendChild(li);
+        continue;
+      }
 
       const activeBtn = document.createElement("button");
       activeBtn.className = active ? "danger-link" : "secondary-button";
