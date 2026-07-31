@@ -1014,6 +1014,9 @@ body {
   display: flex;
   align-items: flex-end;
   z-index: 100;
+  /* Without this, a touch-scroll starting on the dimmed backdrop area (not the modal
+     card itself) can still scroll the page behind it on mobile. */
+  overscroll-behavior: contain;
 }
 
 .modal-backdrop[hidden] { display: none; }
@@ -1027,6 +1030,10 @@ body {
   padding: 20px;
   padding-bottom: calc(20px + env(safe-area-inset-bottom));
   transition: background-color 0.3s ease;
+  /* Stops scroll from "chaining" into the page behind the modal once you hit the top or
+     bottom of the modal's own scrollable content (the reported bug: scrolling inside the
+     Salary Calculator sometimes scrolled the screen underneath instead). */
+  overscroll-behavior: contain;
 }
 
 .modal h2 {
