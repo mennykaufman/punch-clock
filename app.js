@@ -2371,21 +2371,59 @@ const TOUR_STEPS = [
     },
   },
   {
-    // Step 6: Settings — personal info / reminders area.
+    // Step 6: Settings — specifically the Employment & Pay section, since the
+    // tooltip talks about pay rates (the first .settings-section in DOM order
+    // is actually Personal Info, which doesn't match this text at all).
     autoNavigateTo: "settings",
-    target: () => document.querySelector(".settings-section"),
+    target: () => Array.from(document.querySelectorAll(".settings-section")).find((el) => el.textContent.includes("Employment")),
     text: "הגענו להגדרות! כאן תוכל להתאים אישית את תעריפי השכר, התזכורות וההעדפות שלך.",
     advanceType: "manual",
   },
 ];
 
-function positionTourStep(targetEl) {
+const tourClickBlocker = document.getElementById("tour-click-blocker");
+const tourBlockerBands = {
+  top: tourClickBlocker.querySelector('[data-band="top"]'),
+  bottom: tourClickBlocker.querySelector('[data-band="bottom"]'),
+  left: tourClickBlocker.querySelector('[data-band="left"]'),
+  right: tourClickBlocker.querySelector('[data-band="right"]'),
+};
+
+// Leaves a rectangular hole over the target's rect (so the one action the
+// step actually needs stays clickable) by covering everywhere else with 4
+// bands — or covers the full viewport with just the top band for steps
+// where no interaction with the underlying page is expected. Not needed for
+// step 2 (the shift-picker modal): it already sits at a higher z-index than
+// the blocker, so its own buttons stay reachable regardless.
+function updateClickBlockerHole(rect, hasHole) {
+  const { top, bottom, left, right } = tourBlockerBands;
+  if (!hasHole) {
+    top.style.cssText = "top:0; left:0; width:100vw; height:100vh;";
+    bottom.style.display = "none";
+    left.style.display = "none";
+    right.style.display = "none";
+    return;
+  }
+  const pad = 6;
+  const t = Math.max(0, rect.top - pad);
+  const b = Math.min(window.innerHeight, rect.bottom + pad);
+  const l = Math.max(0, rect.left - pad);
+  const r = Math.min(window.innerWidth, rect.right + pad);
+
+  top.style.cssText = `display:block; top:0; left:0; width:100vw; height:${t}px;`;
+  bottom.style.cssText = `display:block; top:${b}px; left:0; width:100vw; height:${Math.max(0, window.innerHeight - b)}px;`;
+  left.style.cssText = `display:block; top:${t}px; left:0; width:${l}px; height:${Math.max(0, b - t)}px;`;
+  right.style.cssText = `display:block; top:${t}px; left:${r}px; width:${Math.max(0, window.innerWidth - r)}px; height:${Math.max(0, b - t)}px;`;
+}
+
+function positionTourStep(targetEl, hasHole) {
   const rect = targetEl.getBoundingClientRect();
   const pad = 6;
   tourSpotlight.style.top = `${rect.top - pad}px`;
   tourSpotlight.style.left = `${rect.left - pad}px`;
   tourSpotlight.style.width = `${rect.width + pad * 2}px`;
   tourSpotlight.style.height = `${rect.height + pad * 2}px`;
+  updateClickBlockerHole(rect, hasHole);
 
   const tooltipWidth = 300;
   const tooltipHeight = tourTooltip.offsetHeight || 140;
@@ -2413,6 +2451,7 @@ function teardownTourStep() {
 function hideTourUI() {
   tourSpotlight.hidden = true;
   tourTooltip.hidden = true;
+  tourClickBlocker.hidden = true;
   teardownTourStep();
 }
 
@@ -2439,8 +2478,10 @@ function runTourStep(index) {
   tourNextBtn.hidden = step.advanceType !== "manual";
   tourSpotlight.hidden = false;
   tourTooltip.hidden = false;
+  tourClickBlocker.hidden = false;
 
-  const reposition = () => positionTourStep(target);
+  const hasHole = step.advanceType === "modalOpen" || step.advanceType === "click";
+  const reposition = () => positionTourStep(target, hasHole);
   reposition();
   window.addEventListener("scroll", reposition, true);
   window.addEventListener("resize", reposition);

@@ -1074,6 +1074,27 @@ body {
 
 /* ---------- guided tour ---------- */
 
+/* Blocks taps anywhere except a rectangular hole over the current target
+   (four bands around it, positioned in JS), so a user can't wander
+   off-script mid-step and leave the tour stuck waiting for an action that
+   will never happen. z-index sits below the modal backdrop's (100) so it
+   never interferes with an already-open modal, which handles its own
+   click-blocking. The container itself doesn't intercept anything — only
+   the individual bands do — so an unpositioned/hidden band is simply inert. */
+#tour-click-blocker {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  pointer-events: none;
+}
+
+#tour-click-blocker[hidden] { display: none; }
+
+.tour-blocker-band {
+  position: fixed;
+  pointer-events: auto;
+}
+
 #tour-spotlight {
   position: fixed;
   border-radius: 12px;
