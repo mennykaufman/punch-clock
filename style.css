@@ -443,6 +443,19 @@ body {
   transition: all 0.3s ease;
 }
 
+.settings-save-bar {
+  position: sticky;
+  bottom: calc(64px + env(safe-area-inset-bottom));
+  background: var(--bg-main);
+  padding-top: 10px;
+  margin-top: 8px;
+}
+
+.settings-save-bar .field-hint {
+  text-align: center;
+  min-height: 18px;
+}
+
 .big-button.is-clockedin {
   background: var(--danger);
   box-shadow: none;
@@ -931,7 +944,6 @@ body {
   top: 2px;
   right: 50%;
   transform: translateX(18px);
-  background: var(--accent-cyan);
   color: var(--btn-primary-text);
   font-size: 8px;
   font-weight: 700;
@@ -940,6 +952,24 @@ body {
   border-radius: 6px;
   line-height: 1.4;
 }
+
+.nav-badge-beta.role-beta { background: var(--accent-cyan); }
+.nav-badge-beta.role-admin { background: linear-gradient(135deg, #B8860B, #6B21A8); }
+
+.role-badge-inline {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  padding: 2px 6px;
+  border-radius: 6px;
+  color: #fff;
+  vertical-align: middle;
+  margin-inline-start: 6px;
+}
+
+.role-badge-inline.role-beta { background: var(--accent-cyan); color: var(--btn-primary-text); }
+.role-badge-inline.role-admin { background: linear-gradient(135deg, #B8860B, #6B21A8); }
 
 .modal-backdrop {
   position: fixed;

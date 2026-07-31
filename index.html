@@ -67,6 +67,12 @@
   </div>
 </div>
 
+<!-- DEACTIVATED (shown when an admin has frozen this account) -->
+<div id="deactivated-screen" hidden style="min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:24px;text-align:center;">
+  <p class="card-title">Account deactivated</p>
+  <p class="field-hint">Your account has been deactivated. Contact your admin if this is a mistake.</p>
+</div>
+
 <div id="app-shell" hidden>
 
 <header class="topbar">
@@ -163,6 +169,10 @@
     </div>
 
     <div id="whosonclock-content" hidden>
+      <div class="segmented-control" id="woc-filter-segmented">
+        <button type="button" class="segmented-option active" data-value="in">מי בפנים</button>
+        <button type="button" class="segmented-option" data-value="with">מי איתי</button>
+      </div>
       <ul class="list woc-list" id="woc-active-list"></ul>
       <div class="woc-divider" id="woc-divider" hidden><span>Coming up</span></div>
       <ul class="list woc-list" id="woc-upcoming-list"></ul>
@@ -192,9 +202,6 @@
         <option value="חוליה מיוחדת">חוליה מיוחדת</option>
       </select>
       <p class="field-hint">Needed to share your weekly schedule in "Who's on the Clock".</p>
-
-      <button class="secondary-button" id="btn-save-personal-info" type="button">Save</button>
-      <p class="field-hint" id="personal-info-saved-hint"></p>
       </div>
     </details>
 
@@ -277,6 +284,7 @@
       <summary class="settings-section-header"><span>Account</span><span class="chevron">▾</span></summary>
       <div class="settings-section-body">
       <p class="field-hint" id="signed-in-as"></p>
+      <span class="role-badge-inline" id="account-role-badge" hidden></span>
       <button class="secondary-button" id="btn-logout" type="button">Log out / Switch user</button>
       <button class="danger-link" id="btn-delete-account" type="button">Delete my account</button>
       </div>
@@ -286,10 +294,23 @@
     <details class="card settings-section" id="admin-settings-section" hidden>
       <summary class="settings-section-header"><span>Admin Settings</span><span class="chevron">▾</span></summary>
       <div class="settings-section-body">
-      <p class="field-hint">Change any user's role.</p>
+
+      <p class="field-label">User Management</p>
+      <p class="field-hint">Change a user's role, or deactivate someone who left.</p>
       <ul class="list" id="admin-user-list"></ul>
+
+      <p class="field-label" style="margin-top:16px;">Feature Flags</p>
+      <p class="field-hint">Which roles can currently see each experimental feature.</p>
+      <ul class="list" id="admin-feature-flags-list"></ul>
+
+      <button class="secondary-button" id="btn-admin-invite" type="button" style="margin-top:16px;">Invite friends (QR / link)</button>
       </div>
     </details>
+
+    <div class="settings-save-bar">
+      <p class="field-hint" id="settings-saved-hint"></p>
+      <button class="big-button" id="btn-save-all-settings" type="button">Save Changes</button>
+    </div>
   </section>
 
 </main>

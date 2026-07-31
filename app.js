@@ -13,6 +13,9 @@ import {
   subscribeToDepartmentSchedules,
   fetchAllUsers,
   updateUserRole,
+  setUserActive,
+  subscribeToFeatureFlags,
+  updateFeatureFlag,
 } from "./data/cloud.js";
 import { parseScheduleSms } from "./data/scheduleParser.js";
 
@@ -61,6 +64,11 @@ let applyingRemoteUpdate = false;
 let unsubscribeDeptSchedules = null;
 let colleagueSchedules = []; // every schedule doc (including our own) in the current department
 let deptSyncedFor = null;
+let unsubscribeFeatureFlags = null;
+// Default matches the original hardcoded behavior, so nothing changes for
+// anyone until an admin actually opens the Feature Flags panel and touches it.
+let featureFlags = { whosOnClock: { user: false, beta: true, admin: true } };
+const KNOWN_FEATURES = { whosOnClock: "Who's in?" };
 
 function saveState() {
   if (!currentUid) return;
@@ -130,11 +138,26 @@ function showAppShell() {
   appShell.hidden = false;
 }
 
+function showDeactivatedScreen() {
+  splashScreen.hidden = true;
+  loginScreen.hidden = true;
+  appShell.hidden = true;
+  document.getElementById("deactivated-screen").hidden = false;
+}
+
 // Subscribes to this account's cloud document so changes made on any other
 // device show up here automatically too.
 function startCloudSync(uidKey) {
   if (unsubscribeCloud) unsubscribeCloud();
   unsubscribeCloud = subscribeToUserData(uidKey, (data) => {
+    // An admin deactivating this account mid-session must take effect
+    // immediately, regardless of seq ordering (setUserActive never bumps seq).
+    if (data?.settings?.active === false) {
+      handleLogout();
+      showDeactivatedScreen();
+      return;
+    }
+
     // A snapshot can arrive late/out-of-order relative to our own rapid local
     // writes (e.g. clock-in immediately followed by an edit); only accept it
     // if it isn't older than what we already have, so it can never clobber a
@@ -169,13 +192,39 @@ function startDeptScheduleSync(department) {
   });
 }
 
-// Who's On Clock is gated to beta/admin roles only — everyone else never sees
-// the nav tab at all (not just blocked after tapping it).
+// Fires once at sign-in and lives for the whole session — every signed-in
+// user needs this (not just admins), since it decides what they themselves
+// can see. Feature-gated visibility is admin-controlled from the Feature
+// Flags panel, replacing what used to be a hardcoded role check.
+function startFeatureFlagsSync() {
+  if (unsubscribeFeatureFlags) unsubscribeFeatureFlags();
+  unsubscribeFeatureFlags = subscribeToFeatureFlags((flags) => {
+    featureFlags = { ...featureFlags, ...flags };
+    applyRoleVisibility();
+    if (!document.getElementById("admin-settings-section").hidden) renderAdminFeatureFlags();
+  });
+}
+
+// Who's On Clock's visibility (and any future gated feature) is looked up
+// dynamically from featureFlags rather than hardcoded, so an admin can widen
+// or narrow the rollout from the Feature Flags panel without a code change.
 function applyRoleVisibility() {
   const role = state?.settings?.role || "user";
-  const canSeeWhosOnClock = role === "beta" || role === "admin";
+  const canSeeWhosOnClock = !!featureFlags.whosOnClock?.[role];
   document.querySelector('[data-nav="whosonclock"]').hidden = !canSeeWhosOnClock;
-  document.getElementById("nav-beta-badge").hidden = role !== "beta";
+
+  const navBadge = document.getElementById("nav-beta-badge");
+  const isBetaOrAdmin = role === "beta" || role === "admin";
+  navBadge.hidden = !isBetaOrAdmin;
+  navBadge.textContent = role === "admin" ? "ADMIN" : "BETA";
+  navBadge.classList.toggle("role-admin", role === "admin");
+  navBadge.classList.toggle("role-beta", role !== "admin");
+
+  const accountBadge = document.getElementById("account-role-badge");
+  accountBadge.hidden = !isBetaOrAdmin;
+  accountBadge.textContent = role === "admin" ? "ADMIN" : "BETA";
+  accountBadge.classList.toggle("role-admin", role === "admin");
+  accountBadge.classList.toggle("role-beta", role !== "admin");
 }
 
 // Admin-only panel: lets an admin change any registered user's role directly
@@ -193,13 +242,14 @@ async function renderAdminUserList() {
     for (const u of users) {
       const name = `${u.settings?.firstName || ""} ${u.settings?.lastName || ""}`.trim() || u.uid;
       const role = u.settings?.role || "user";
+      const active = u.settings?.active !== false;
 
       const li = document.createElement("li");
       li.className = "list-item";
 
       const nameP = document.createElement("p");
       nameP.className = "list-item-title";
-      nameP.textContent = name;
+      nameP.textContent = active ? name : `${name} (inactive)`;
 
       const select = document.createElement("select");
       select.className = "field-input";
@@ -217,12 +267,78 @@ async function renderAdminUserList() {
         }
       });
 
-      li.append(nameP, select);
+      const activeBtn = document.createElement("button");
+      activeBtn.className = active ? "danger-link" : "secondary-button";
+      activeBtn.type = "button";
+      activeBtn.textContent = active ? "Deactivate" : "Reactivate";
+      activeBtn.addEventListener("click", async () => {
+        activeBtn.disabled = true;
+        try {
+          await setUserActive(u.uid, !active);
+          renderAdminUserList();
+        } catch (err) {
+          console.error("active toggle failed:", err);
+          activeBtn.disabled = false;
+        }
+      });
+
+      li.append(nameP, select, activeBtn);
       list.appendChild(li);
     }
   } catch (err) {
     console.error("failed to load users:", err);
     list.innerHTML = `<li class="list-empty">Couldn't load users</li>`;
+  }
+}
+
+// Admin-only panel: toggles which role tiers can currently see each
+// experimental feature. Starting point for any future feature — new ones
+// should register themselves in KNOWN_FEATURES and default to off for
+// everyone until an admin explicitly turns them on for a role.
+function renderAdminFeatureFlags() {
+  const list = document.getElementById("admin-feature-flags-list");
+  list.innerHTML = "";
+  for (const [key, label] of Object.entries(KNOWN_FEATURES)) {
+    const li = document.createElement("li");
+    li.className = "list-item";
+
+    const titleP = document.createElement("p");
+    titleP.className = "list-item-title";
+    titleP.textContent = label;
+    li.appendChild(titleP);
+
+    const row = document.createElement("div");
+    row.className = "list-item-row";
+    for (const role of ["user", "beta", "admin"]) {
+      const wrap = document.createElement("label");
+      wrap.className = "switch-row";
+      wrap.style.cssText = "gap:4px;";
+      const span = document.createElement("span");
+      span.textContent = role;
+      const toggleLabel = document.createElement("label");
+      toggleLabel.className = "toggle-switch";
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.checked = !!featureFlags[key]?.[role];
+      input.addEventListener("change", async () => {
+        input.disabled = true;
+        try {
+          await updateFeatureFlag(key, role, input.checked);
+        } catch (err) {
+          console.error("feature flag update failed:", err);
+          input.checked = !input.checked;
+        } finally {
+          input.disabled = false;
+        }
+      });
+      const slider = document.createElement("span");
+      slider.className = "toggle-slider";
+      toggleLabel.append(input, slider);
+      wrap.append(span, toggleLabel);
+      row.appendChild(wrap);
+    }
+    li.appendChild(row);
+    list.appendChild(li);
   }
 }
 
@@ -279,6 +395,7 @@ btnWelcomeContinue.addEventListener("click", async () => {
     saveLocalCache(currentUid, state);
     startCloudSync(currentUid);
     startDeptScheduleSync(state.settings.department);
+    startFeatureFlagsSync();
     applyRoleVisibility();
     showAppShell();
     renderHome();
@@ -297,11 +414,16 @@ async function handleAuthenticatedUser(user) {
   currentUserLabel = user.email || user.displayName || user.uid;
   try {
     const existing = await withTimeout(fetchUserData(user.uid), 10000, "timed out fetching account");
+    if (existing?.settings?.active === false) {
+      showDeactivatedScreen();
+      return;
+    }
     if (existing) {
       state = existing;
       saveLocalCache(currentUid, state);
       startCloudSync(currentUid);
       startDeptScheduleSync(state.settings.department);
+      startFeatureFlagsSync();
       applyRoleVisibility();
       showAppShell();
       renderHome();
@@ -319,6 +441,7 @@ async function handleAuthenticatedUser(user) {
       state = cached;
       startCloudSync(currentUid);
       startDeptScheduleSync(state.settings.department);
+      startFeatureFlagsSync();
       applyRoleVisibility();
       showAppShell();
       renderHome();
@@ -336,6 +459,8 @@ function handleLogout() {
   unsubscribeDeptSchedules = null;
   colleagueSchedules = [];
   deptSyncedFor = null;
+  if (unsubscribeFeatureFlags) unsubscribeFeatureFlags();
+  unsubscribeFeatureFlags = null;
   if (clockTimerInterval) {
     clearInterval(clockTimerInterval);
     clockTimerInterval = null;
@@ -361,7 +486,7 @@ function boot() {
 // ---------- formatting helpers ----------
 
 function formatTime(date) {
-  return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
 }
 function formatDate(date) {
   return date.toLocaleDateString([], { day: "2-digit", month: "short" });
@@ -1153,6 +1278,12 @@ function hasSharedCurrentWeek(shifts, now = new Date()) {
   });
 }
 
+let whosOnClockFilterMode = "in"; // "in" = everyone active/upcoming, "with" = only colleagues overlapping my own shift
+
+function shiftsOverlap(aStart, aEnd, bStart, bEnd) {
+  return aStart < bEnd && bStart < aEnd;
+}
+
 function renderWhosOnClock() {
   const lockedCard = document.getElementById("whosonclock-locked");
   const content = document.getElementById("whosonclock-content");
@@ -1168,10 +1299,11 @@ function renderWhosOnClock() {
 
   const now = new Date();
   const twoHoursFromNow = new Date(now.getTime() + 2 * 3600000);
-  const myActiveShift = (mine.shifts || []).find((s) => new Date(s.startISO) <= now && now < new Date(s.endISO));
+  const myShiftIntervals = (mine.shifts || []).map((s) => ({ start: new Date(s.startISO), end: new Date(s.endISO) }));
+  const myActiveShift = myShiftIntervals.find((s) => s.start <= now && now < s.end);
 
-  const activeNow = [];
-  const comingUp = [];
+  let activeNow = [];
+  let comingUp = [];
   for (const colleague of colleagueSchedules) {
     if (colleague.uid === currentUid) continue;
     for (const shift of colleague.shifts || []) {
@@ -1184,6 +1316,13 @@ function renderWhosOnClock() {
       }
     }
   }
+
+  if (whosOnClockFilterMode === "with") {
+    const overlapsMine = (start, end) => myShiftIntervals.some((m) => shiftsOverlap(start, end, m.start, m.end));
+    activeNow = activeNow.filter(({ start, end }) => overlapsMine(start, end));
+    comingUp = comingUp.filter(({ start, end }) => overlapsMine(start, end));
+  }
+
   activeNow.sort((a, b) => a.start - b.start);
   comingUp.sort((a, b) => a.start - b.start);
 
@@ -1194,7 +1333,9 @@ function renderWhosOnClock() {
   upcomingList.innerHTML = "";
 
   if (!activeNow.length && !comingUp.length) {
-    activeList.innerHTML = `<li class="list-empty">No colleagues on clock right now</li>`;
+    activeList.innerHTML = whosOnClockFilterMode === "with"
+      ? `<li class="list-empty">No colleagues overlap with your shift right now</li>`
+      : `<li class="list-empty">No colleagues on clock right now</li>`;
   }
 
   for (const { colleague, shift, start, end } of activeNow) {
@@ -1219,6 +1360,16 @@ function renderWhosOnClock() {
     upcomingList.appendChild(li);
   }
 }
+
+document.querySelectorAll("#woc-filter-segmented .segmented-option").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    whosOnClockFilterMode = btn.dataset.value;
+    document.querySelectorAll("#woc-filter-segmented .segmented-option").forEach((b) => {
+      b.classList.toggle("active", b === btn);
+    });
+    renderWhosOnClock();
+  });
+});
 
 // Keeps Active Now / Coming Up fresh purely from the passage of time (no
 // Firestore write involved), mirroring the home screen's elapsed-time ticker.
@@ -1359,6 +1510,10 @@ document.getElementById("btn-update-schedule").addEventListener("click", openUpd
 const APP_URL = "https://mennykaufman.github.io/punch-clock/";
 const APP_LOGO_URL = `${APP_URL}icons/icon-192.png`;
 
+function inviteShareText() {
+  return `TrackO'clock – האפליקציה של מני שמחברת את העובדים ומנגישה הכל! 🤝\nכנס/י לראות מי איתך במשמרת וכמה נקודות נשארו לך בלובה: ${APP_URL}`;
+}
+
 function openInviteModal() {
   openModal("Invite friends");
 
@@ -1382,13 +1537,13 @@ function openInviteModal() {
   shareBtn.addEventListener("click", async () => {
     if (canNativeShare) {
       try {
-        await navigator.share({ title: "TrackO'clock", text: "Join me on TrackO'clock", url: APP_URL });
+        await navigator.share({ title: "TrackO'clock", text: inviteShareText() });
       } catch (err) {
         // User closed the native share sheet without picking anything — not an error.
       }
     } else {
       try {
-        await navigator.clipboard.writeText(APP_URL);
+        await navigator.clipboard.writeText(inviteShareText());
         shareBtn.textContent = "Copied ✓";
         setTimeout(() => { shareBtn.textContent = "Copy link"; }, 1500);
       } catch (err) {
@@ -1406,6 +1561,7 @@ function openInviteModal() {
 }
 
 document.getElementById("btn-invite-friends").addEventListener("click", openInviteModal);
+document.getElementById("btn-admin-invite").addEventListener("click", openInviteModal);
 
 // ---------- render: settings ----------
 
@@ -1422,7 +1578,6 @@ function renderSettings() {
   document.getElementById("settings-first-name").value = state.settings.firstName || "";
   document.getElementById("settings-last-name").value = state.settings.lastName || "";
   document.getElementById("settings-department").value = state.settings.department || "";
-  document.getElementById("personal-info-saved-hint").textContent = "";
   document.getElementById("settings-base-wage").value = state.settings.baseWageILS || BASE_WAGE_ILS;
   document.getElementById("remind-points-toggle").checked = !!state.settings.remindPointsOnClockOut;
   document.getElementById("track-shift-type-toggle").checked = !!state.settings.trackShiftType;
@@ -1432,7 +1587,10 @@ function renderSettings() {
 
   const isAdmin = (state.settings.role || "user") === "admin";
   document.getElementById("admin-settings-section").hidden = !isAdmin;
-  if (isAdmin) renderAdminUserList();
+  if (isAdmin) {
+    renderAdminUserList();
+    renderAdminFeatureFlags();
+  }
 
   document.getElementById("settings-employment-start-date").value = state.settings.employmentStartDate || "";
 
@@ -1466,79 +1624,72 @@ for (const key of ["hours", "shifts", "pay", "averages", "luba", "export"]) {
   document.getElementById(`more-widget-${key}`).addEventListener("change", (e) => {
     if (!state.settings.moreWidgets) state.settings.moreWidgets = {};
     state.settings.moreWidgets[key] = e.target.checked;
-    saveState();
   });
 }
 
-document.getElementById("btn-save-personal-info").addEventListener("click", () => {
-  const firstName = document.getElementById("settings-first-name").value.trim();
-  const lastName = document.getElementById("settings-last-name").value.trim();
-  const department = document.getElementById("settings-department").value;
-  const savedHint = document.getElementById("personal-info-saved-hint");
+document.getElementById("settings-first-name").addEventListener("change", (e) => {
+  state.settings.firstName = e.target.value.trim();
+});
 
-  if (!firstName || !lastName || !department) {
-    savedHint.className = "field-error";
-    savedHint.textContent = "Please fill in all three fields.";
-    return;
-  }
+document.getElementById("settings-last-name").addEventListener("change", (e) => {
+  state.settings.lastName = e.target.value.trim();
+});
 
-  state.settings.firstName = firstName;
-  state.settings.lastName = lastName;
-  state.settings.department = department;
-  saveState();
-  startDeptScheduleSync(department);
-
-  savedHint.className = "field-hint";
-  savedHint.textContent = "Saved ✓";
+document.getElementById("settings-department").addEventListener("change", (e) => {
+  state.settings.department = e.target.value;
+  startDeptScheduleSync(state.settings.department);
 });
 
 document.getElementById("settings-base-wage").addEventListener("change", (e) => {
   const value = Number(e.target.value);
   state.settings.baseWageILS = value > 0 ? value : BASE_WAGE_ILS;
-  saveState();
   renderSettings();
 });
 
 document.getElementById("settings-employment-start-date").addEventListener("change", (e) => {
   state.settings.employmentStartDate = e.target.value;
-  saveState();
   renderSettings();
 });
 
 document.querySelectorAll("#idf-bonus-segmented .segmented-option").forEach((btn) => {
   btn.addEventListener("click", () => {
     state.settings.idfBonusPercent = Number(btn.dataset.value);
-    saveState();
     renderSettings();
   });
 });
 
 document.getElementById("settings-seniority-toggle").addEventListener("change", (e) => {
   state.settings.productivityBonusOverride = e.target.checked;
-  saveState();
   renderSettings();
 });
 
 document.getElementById("monthly-hours-goal").addEventListener("change", (e) => {
   state.settings.monthlyHoursGoal = Number(e.target.value) || 0;
-  saveState();
 });
 
 document.getElementById("remind-points-toggle").addEventListener("change", (e) => {
   state.settings.remindPointsOnClockOut = e.target.checked;
-  saveState();
 });
 
 document.getElementById("track-shift-type-toggle").addEventListener("change", (e) => {
   state.settings.trackShiftType = e.target.checked;
-  saveState();
   renderHistory();
 });
 
 document.getElementById("theme-select").addEventListener("change", (e) => {
   state.settings.theme = e.target.value;
-  saveState();
   applyTheme();
+});
+
+// One global save for the whole Settings screen — every field above only
+// mutates `state` in memory (for live feedback like hints/theme), and this
+// button is what actually persists it, instead of each section silently
+// saving itself the moment you touch it.
+document.getElementById("btn-save-all-settings").addEventListener("click", () => {
+  saveState();
+  const hint = document.getElementById("settings-saved-hint");
+  hint.textContent = "Saved ✓";
+  setTimeout(() => { hint.textContent = ""; }, 2000);
 });
 
 document.getElementById("btn-logout").addEventListener("click", handleLogout);

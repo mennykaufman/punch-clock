@@ -151,3 +151,26 @@ export async function fetchAllUsers() {
 export async function updateUserRole(uid, role) {
   await updateDoc(doc(db, "users", uid), { "settings.role": role });
 }
+
+// Admin-only: freezes/unfreezes a user's ability to sign in at all.
+export async function setUserActive(uid, active) {
+  await updateDoc(doc(db, "users", uid), { "settings.active": active });
+}
+
+function featureFlagsRef() {
+  return doc(db, "config", "featureFlags");
+}
+
+// Fires immediately with the current flags (or {} if the config doc doesn't
+// exist yet), then again whenever an admin changes them — every signed-in
+// user needs this, not just admins, since it decides what they can see.
+export function subscribeToFeatureFlags(onData) {
+  return onSnapshot(featureFlagsRef(), (snap) => onData(snap.exists() ? snap.data() : {}));
+}
+
+// Admin-only: enables/disables one feature for one role tier. A dotted field
+// path update (not setDoc) so multiple admins editing different flags/roles
+// in parallel can never clobber each other's changes.
+export async function updateFeatureFlag(featureKey, role, enabled) {
+  await setDoc(featureFlagsRef(), { [featureKey]: { [role]: enabled } }, { merge: true });
+}
