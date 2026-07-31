@@ -523,6 +523,13 @@ async function handleAuthenticatedUser(user) {
     // fall back to the last-synced local copy instead of blocking the user out
     // entirely. It'll pick back up with the cloud once startCloudSync gets a connection.
     const cached = loadLocalCache(user.uid);
+    if (cached?.settings?.active === false) {
+      // The cache can be stale, but never in the direction of hiding a deactivation —
+      // otherwise a blocked user could bypass it just by forcing this fetch to fail
+      // (e.g. going offline) and falling back to an old "active" local snapshot.
+      showDeactivatedScreen();
+      return;
+    }
     if (cached) {
       state = cached;
       startCloudSync(currentUid);
@@ -895,10 +902,34 @@ function currentProductivityBonusEnabled(referenceDate = new Date()) {
   return isProductivityBonusEligible(state.settings.employmentStartDate, referenceDate);
 }
 
+// The +10% seniority bonus for a given payslip month is a lump sum based on hours
+// worked TWO MONTHS earlier, re-rated to the wage currently in effect — confirmed
+// exact (within 0.03%) against three real employer payslips. Each historical punch's
+// own payBreakdown already records the wage rate that was active when it was worked,
+// so dividing its pre-bonus pay by that rate recovers a rate-independent "hours at
+// 100%" figure; multiplying that by today's wage is what re-rates it to the present
+// without needing to track wage history separately anywhere else.
+function computeSeniorityBonusForMonth(monthDate) {
+  if (!currentProductivityBonusEnabled(monthDate)) return 0;
+  const refMonth = new Date(monthDate.getFullYear(), monthDate.getMonth() - 2, 1);
+  const refPunches = state.punches.filter((p) => sameMonth(new Date(p.clockOutISO), refMonth));
+  if (!refPunches.length) return 0;
+
+  let weightedHours = 0;
+  for (const p of refPunches) {
+    const pb = p.payBreakdown;
+    if (!pb || !pb.baseWageILS) continue;
+    weightedHours += pb.preBonusPayILS / pb.baseWageILS;
+  }
+  const currentWage = state.settings.baseWageILS || BASE_WAGE_ILS;
+  return round2(0.1 * currentWage * weightedHours);
+}
+
 function buildPunch(clockInDate, clockOutDate, shift, pickedShift, shiftType = "") {
-  const eligible = currentProductivityBonusEnabled(clockOutDate);
+  // The +10% seniority bonus is not part of any single shift's pay — see
+  // computeSeniorityBonusForMonth, which adds it once per month as a lump sum based on
+  // hours worked two months earlier.
   const pay = calculatePay(clockInDate, clockOutDate, {
-    productivityBonusEligible: eligible,
     idfBonusPercent: state.settings.idfBonusPercent || 0,
     baseWageILS: state.settings.baseWageILS || BASE_WAGE_ILS,
   });
@@ -965,7 +996,7 @@ function showClockOutSummary(punch, pay, pointsDelta) {
 
   body.innerHTML = `
     <p><strong>${punch.actualHours}h</strong> worked (${punch.shiftLabel})</p>
-    <p>Pay: <strong>${formatILS(punch.payILS)}</strong>${pay.productivityBonusApplied ? " (incl. +10% seniority bonus)" : ""}</p>
+    <p>Pay: <strong>${formatILS(punch.payILS)}</strong></p>
     <p>Luba points earned: <strong>${punch.mealPoints}</strong> (${punch.voucherNote})</p>
     ${adjustmentNote}
   `;
@@ -1260,16 +1291,34 @@ function renderCafeteria() {
     return;
   }
 
+  // Built with textContent rather than innerHTML: entry.note is a free-text field the
+  // user typed themselves and could contain HTML — reading it back through innerHTML
+  // would execute it, so even though this is currently only ever shown back to its
+  // own author, it's not a safe pattern to leave in place.
   for (const entry of feed) {
     const li = document.createElement("li");
     li.className = "list-item";
     const d = new Date(entry.timestampISO);
     const sign = entry.kind === "earned" ? "+" : "-";
     const colorClass = entry.kind === "earned" ? "pts-earned" : "pts-spent";
-    li.innerHTML = `
-      <div class="list-item-row"><span>${formatDate(d)} ${formatTime(d)}</span><span class="${colorClass}">${entry.kind} ${sign}${entry.points} pts</span></div>
-      ${entry.note ? `<p class="list-item-sub">${entry.note}</p>` : ""}
-    `;
+
+    const row = document.createElement("div");
+    row.className = "list-item-row";
+    const dateSpan = document.createElement("span");
+    dateSpan.textContent = `${formatDate(d)} ${formatTime(d)}`;
+    const ptsSpan = document.createElement("span");
+    ptsSpan.className = colorClass;
+    ptsSpan.textContent = `${entry.kind} ${sign}${entry.points} pts`;
+    row.append(dateSpan, ptsSpan);
+    li.appendChild(row);
+
+    if (entry.note) {
+      const noteP = document.createElement("p");
+      noteP.className = "list-item-sub";
+      noteP.textContent = entry.note;
+      li.appendChild(noteP);
+    }
+
     if (entry.kind === "spent") {
       li.classList.add("is-clickable");
       li.addEventListener("click", () => openEditSpendingModal(entry.raw));
@@ -1435,14 +1484,34 @@ function renderWhosOnClock() {
       : `<li class="list-empty">No colleagues on clock right now</li>`;
   }
 
+  // Built with textContent/createElement rather than innerHTML: colleague.displayName
+  // and shift.role both come from another user's own Firestore schedule doc (their
+  // Settings name fields / a pasted-SMS free-text tail), so they're attacker-controlled
+  // data — interpolating them into innerHTML would be a stored-XSS hole letting any
+  // signed-in colleague run script in everyone else's session just by typing HTML into
+  // their own name or shift-role text.
   for (const { colleague, shift, start, end } of activeNow) {
     const li = document.createElement("li");
     li.className = "list-item woc-card woc-active";
-    const withYou = myActiveShift ? `<span class="woc-tag">· with you</span>` : "";
-    li.innerHTML = `
-      <div class="woc-name"><span class="woc-dot"></span>${colleague.displayName}${withYou}</div>
-      <p class="list-item-sub">${formatTime(start)} - ${formatTime(end)}${shift.role ? ` · ${shift.role}` : ""}</p>
-    `;
+
+    const nameDiv = document.createElement("div");
+    nameDiv.className = "woc-name";
+    const dot = document.createElement("span");
+    dot.className = "woc-dot";
+    nameDiv.appendChild(dot);
+    nameDiv.appendChild(document.createTextNode(colleague.displayName));
+    if (myActiveShift) {
+      const withYouTag = document.createElement("span");
+      withYouTag.className = "woc-tag";
+      withYouTag.textContent = "· with you";
+      nameDiv.appendChild(withYouTag);
+    }
+
+    const subP = document.createElement("p");
+    subP.className = "list-item-sub";
+    subP.textContent = `${formatTime(start)} - ${formatTime(end)}${shift.role ? ` · ${shift.role}` : ""}`;
+
+    li.append(nameDiv, subP);
     activeList.appendChild(li);
   }
 
@@ -1450,10 +1519,16 @@ function renderWhosOnClock() {
   for (const { colleague, shift, start, end } of comingUp) {
     const li = document.createElement("li");
     li.className = "list-item woc-card woc-upcoming";
-    li.innerHTML = `
-      <div class="woc-name">${colleague.displayName}</div>
-      <p class="list-item-sub">${formatTime(start)} - ${formatTime(end)}${shift.role ? ` · ${shift.role}` : ""}</p>
-    `;
+
+    const nameDiv = document.createElement("div");
+    nameDiv.className = "woc-name";
+    nameDiv.textContent = colleague.displayName;
+
+    const subP = document.createElement("p");
+    subP.className = "list-item-sub";
+    subP.textContent = `${formatTime(start)} - ${formatTime(end)}${shift.role ? ` · ${shift.role}` : ""}`;
+
+    li.append(nameDiv, subP);
     upcomingList.appendChild(li);
   }
 }
@@ -1473,6 +1548,31 @@ document.querySelectorAll("#woc-filter-segmented .segmented-option").forEach((bt
 setInterval(() => {
   if (!document.getElementById("screen-whosonclock").hidden) renderWhosOnClock();
 }, 60000);
+
+// Shared by the "currently saved" list and the paste-preview list below — built with
+// textContent rather than innerHTML since `role` is free text (typed in Settings, or
+// the tail of a pasted SMS line) and must never be interpreted as HTML.
+function buildShiftListItem(dateLabel, timeLabel, role) {
+  const li = document.createElement("li");
+  li.className = "list-item";
+
+  const row = document.createElement("div");
+  row.className = "list-item-row";
+  const dateSpan = document.createElement("span");
+  dateSpan.textContent = dateLabel;
+  const timeSpan = document.createElement("span");
+  timeSpan.textContent = timeLabel;
+  row.append(dateSpan, timeSpan);
+  li.appendChild(row);
+
+  if (role) {
+    const roleP = document.createElement("p");
+    roleP.className = "list-item-sub";
+    roleP.textContent = role;
+    li.appendChild(roleP);
+  }
+  return li;
+}
 
 function openUpdateScheduleModal() {
   openModal("Update your schedule");
@@ -1499,9 +1599,8 @@ function openUpdateScheduleModal() {
     const currentList = document.createElement("ul");
     currentList.className = "list";
     mine.shifts.forEach((s, index) => {
-      const li = document.createElement("li");
-      li.className = "list-item is-clickable";
-      li.innerHTML = `<div class="list-item-row"><span>${s.dateISO}</span><span>${formatTime(new Date(s.startISO))} - ${formatTime(new Date(s.endISO))}</span></div>${s.role ? `<p class="list-item-sub">${s.role}</p>` : ""}`;
+      const li = buildShiftListItem(s.dateISO, `${formatTime(new Date(s.startISO))} - ${formatTime(new Date(s.endISO))}`, s.role);
+      li.classList.add("is-clickable");
       li.addEventListener("click", () => {
         closeModal();
         openEditScheduleShiftModal(index);
@@ -1555,9 +1654,7 @@ function openUpdateScheduleModal() {
 
     preview.innerHTML = "";
     for (const s of shifts) {
-      const li = document.createElement("li");
-      li.className = "list-item";
-      li.innerHTML = `<div class="list-item-row"><span>${s.dateISO}</span><span>${formatTime(new Date(s.startISO))} - ${formatTime(new Date(s.endISO))}</span></div><p class="list-item-sub">${s.role}</p>`;
+      const li = buildShiftListItem(s.dateISO, `${formatTime(new Date(s.startISO))} - ${formatTime(new Date(s.endISO))}`, s.role);
       preview.appendChild(li);
     }
   });
@@ -2013,7 +2110,8 @@ function computeMoreStats(referenceDate = new Date()) {
   const weekHours = sum(weekPunches, "actualHours");
   const weekPay = sum(weekPunches, "payILS");
   const monthHours = sum(monthPunches, "actualHours");
-  const monthPay = sum(monthPunches, "payILS");
+  const seniorityBonus = computeSeniorityBonusForMonth(referenceDate);
+  const monthPay = sum(monthPunches, "payILS") + seniorityBonus;
   const monthShiftCount = monthPunches.length;
 
   const monthSpending = state.cafeteriaSpending.filter((s) => sameMonth(new Date(s.timestampISO), referenceDate));
@@ -2027,7 +2125,7 @@ function computeMoreStats(referenceDate = new Date()) {
   const { earned, spent, balance } = monthlyBalance(referenceDate);
 
   return {
-    weekHours, weekPay, monthHours, monthPay, monthShiftCount, monthPunches,
+    weekHours, weekPay, monthHours, monthPay, monthShiftCount, monthPunches, seniorityBonus,
     avgHoursPerShift: monthShiftCount ? monthHours / monthShiftCount : 0,
     avgPayPerShift: monthShiftCount ? monthPay / monthShiftCount : 0,
     avgHourlyPay: monthHours ? monthPay / monthHours : 0,
@@ -2363,10 +2461,10 @@ function round2(n) {
 }
 
 // Aggregates every punch's stored per-shift breakdown into one month-wide summary:
-// hours (and ILS) per exact rate percentage, plus how much of the total came from
-// each bonus. Bonuses are unwound in the same order calculatePay applies them
-// (base -> +10% פריון -> +IDF%) so each bonus's own ILS contribution is isolated.
-function computeMonthlyPayBreakdown(monthPunches) {
+// hours (and ILS) per exact rate percentage, plus the IDF bonus (still per-shift) and
+// the seniority bonus (a separate monthly lump sum — see computeSeniorityBonusForMonth
+// — based on hours worked two months earlier, not on any of this month's own punches).
+function computeMonthlyPayBreakdown(monthPunches, monthDate) {
   // Keyed by a label (not just the raw percent) so the Shabbat 300% bucket can be
   // split into its two CBA-mandated components — "200% Shabbat hours" + "100%
   // weekly-rest addition" — without colliding with genuine 100%/200% day-rate
@@ -2374,10 +2472,7 @@ function computeMonthlyPayBreakdown(monthPunches) {
   const rateBuckets = {}; // key -> { label, sortRate, hours, amountILS } — amount uses each punch's
                            // OWN wage at the time it was worked, so a later wage change never distorts past months.
   let totalPreBonus = 0;
-  let totalProductivityAmount = 0;
   let totalIdfAmount = 0;
-  let totalFinal = 0;
-  let anyProductivityBonus = false;
   const idfPercentsUsed = new Set();
 
   for (const p of monthPunches) {
@@ -2405,14 +2500,10 @@ function computeMonthlyPayBreakdown(monthPunches) {
     }
 
     const base = pay.preBonusPayILS;
-    const afterProductivity = pay.productivityBonusApplied ? base * 1.1 : base;
-    const afterIdf = pay.idfBonusPercent ? afterProductivity * (1 + pay.idfBonusPercent / 100) : afterProductivity;
+    const afterIdf = pay.idfBonusPercent ? base * (1 + pay.idfBonusPercent / 100) : base;
 
     totalPreBonus += base;
-    totalProductivityAmount += afterProductivity - base;
-    totalIdfAmount += afterIdf - afterProductivity;
-    totalFinal += pay.finalPayILS;
-    if (pay.productivityBonusApplied) anyProductivityBonus = true;
+    totalIdfAmount += afterIdf - base;
     if (pay.idfBonusPercent) idfPercentsUsed.add(pay.idfBonusPercent);
   }
 
@@ -2425,13 +2516,15 @@ function computeMonthlyPayBreakdown(monthPunches) {
     }))
     .sort((a, b) => a.sortRate - b.sortRate);
 
+  const seniorityBonus = computeSeniorityBonusForMonth(monthDate);
+
   return {
     hoursByRate,
     totalPreBonus: round2(totalPreBonus),
-    totalProductivityAmount: round2(totalProductivityAmount),
+    totalProductivityAmount: seniorityBonus,
     totalIdfAmount: round2(totalIdfAmount),
-    totalFinal: round2(totalFinal),
-    anyProductivityBonus,
+    totalFinal: round2(totalPreBonus + totalIdfAmount + seniorityBonus),
+    anyProductivityBonus: seniorityBonus > 0,
     idfPercentsUsed,
   };
 }
@@ -2440,10 +2533,14 @@ function openMonthlyBreakdownModal(monthPunches, monthDate) {
   const monthLabel = monthDate.toLocaleDateString([], { year: "numeric", month: "long" });
   openModal(`Pay breakdown — ${monthLabel}`);
 
-  if (!monthPunches.length) {
+  // The seniority bonus can be non-zero even in a month with no shifts of its own
+  // (it's based on hours worked two months earlier), so it's always computed —
+  // only the per-shift rate breakdown is skipped when there's nothing this month.
+  const b = computeMonthlyPayBreakdown(monthPunches, monthDate);
+
+  if (!monthPunches.length && !b.totalProductivityAmount) {
     modalBody.innerHTML = `<p class="field-hint">No shifts this month.</p>`;
   } else {
-    const b = computeMonthlyPayBreakdown(monthPunches);
     const rateRows = b.hoursByRate.map((r) => [r.label, `${r.hours}h — ${formatILS(r.amountILS)}`]);
     const idfLabel = b.idfPercentsUsed.size === 1
       ? `+${[...b.idfPercentsUsed][0]}% IDF bonus`
@@ -2451,7 +2548,7 @@ function openMonthlyBreakdownModal(monthPunches, monthDate) {
     const rows = [
       ...rateRows,
       ["Before bonuses", formatILS(b.totalPreBonus)],
-      ["+10% seniority bonus", b.anyProductivityBonus ? formatILS(b.totalProductivityAmount) : "Not applied"],
+      ["+10% seniority bonus (2 months back)", b.anyProductivityBonus ? formatILS(b.totalProductivityAmount) : "Not applied"],
       [idfLabel, b.idfPercentsUsed.size ? formatILS(b.totalIdfAmount) : "Not applied"],
       ["Total pay this month", formatILS(b.totalFinal)],
     ];
@@ -2462,7 +2559,189 @@ function openMonthlyBreakdownModal(monthPunches, monthDate) {
   closeBtn.className = "btn-primary";
   closeBtn.textContent = "Close";
   closeBtn.addEventListener("click", closeModal);
+
+  const calcBtn = document.createElement("button");
+  calcBtn.className = "btn-plain";
+  calcBtn.textContent = "🧮 Salary Calculator";
+  calcBtn.addEventListener("click", () => {
+    closeModal();
+    openSalaryCalculatorModal();
+  });
+
+  modalActions.append(closeBtn, calcBtn);
+}
+
+// ---------- salary calculator (shift simulator + rules explainer) ----------
+
+function openSalaryCalculatorModal(initialTab = "simulator") {
+  openModal("🧮 Salary Calculator");
+
+  const tabBar = document.createElement("div");
+  tabBar.className = "segmented-control";
+  const simTabBtn = document.createElement("button");
+  simTabBtn.type = "button";
+  simTabBtn.className = "segmented-option";
+  simTabBtn.textContent = "🧮 Shift Simulator";
+  const rulesTabBtn = document.createElement("button");
+  rulesTabBtn.type = "button";
+  rulesTabBtn.className = "segmented-option";
+  rulesTabBtn.textContent = "📖 Salary Rules";
+  tabBar.append(simTabBtn, rulesTabBtn);
+
+  const contentArea = document.createElement("div");
+  modalBody.append(tabBar, contentArea);
+
+  function showTab(tab) {
+    simTabBtn.classList.toggle("active", tab === "simulator");
+    rulesTabBtn.classList.toggle("active", tab === "rules");
+    contentArea.innerHTML = "";
+    if (tab === "simulator") renderShiftSimulatorTab(contentArea);
+    else renderSalaryRulesTab(contentArea);
+  }
+
+  simTabBtn.addEventListener("click", () => showTab("simulator"));
+  rulesTabBtn.addEventListener("click", () => showTab("rules"));
+  showTab(initialTab);
+
+  const closeBtn = document.createElement("button");
+  closeBtn.className = "btn-primary";
+  closeBtn.textContent = "Close";
+  closeBtn.addEventListener("click", closeModal);
   modalActions.appendChild(closeBtn);
+}
+
+// Read-only "what would this shift pay?" preview — runs the real calculatePay() engine
+// live against whatever the user types, but never touches state.punches or saveState().
+function renderShiftSimulatorTab(container) {
+  const today = new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  const todayStr = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
+
+  const dateLabel = document.createElement("label");
+  dateLabel.className = "field-label";
+  dateLabel.textContent = "Date";
+  const dateInput = document.createElement("input");
+  dateInput.className = "field-input";
+  dateInput.type = "date";
+  dateInput.value = todayStr;
+
+  const startLabel = document.createElement("label");
+  startLabel.className = "field-label";
+  startLabel.textContent = "Start time";
+  const startInput = document.createElement("input");
+  startInput.className = "field-input";
+  startInput.type = "time";
+  startInput.value = "12:00";
+
+  const endLabel = document.createElement("label");
+  endLabel.className = "field-label";
+  endLabel.textContent = "End time";
+  const endInput = document.createElement("input");
+  endInput.className = "field-input";
+  endInput.type = "time";
+  endInput.value = "20:00";
+
+  const resultBox = document.createElement("div");
+
+  const hint = document.createElement("p");
+  hint.className = "field-hint";
+  hint.textContent = "Simulation only — this is never saved to your account.";
+
+  container.append(dateLabel, dateInput, startLabel, startInput, endLabel, endInput, resultBox, hint);
+
+  function recompute() {
+    if (!dateInput.value || !startInput.value || !endInput.value) {
+      resultBox.innerHTML = `<p class="field-hint">Enter a date, start time, and end time.</p>`;
+      return;
+    }
+    const clockIn = new Date(`${dateInput.value}T${startInput.value}`);
+    let clockOut = new Date(`${dateInput.value}T${endInput.value}`);
+    if (clockOut <= clockIn) clockOut = new Date(clockOut.getTime() + 24 * 3600000); // crosses midnight
+
+    // No manual break field — the 30-min-if-over-6h rule always applies automatically,
+    // same as it does for a real punch.
+    let pay;
+    try {
+      pay = calculatePay(clockIn, clockOut, {
+        baseWageILS: state.settings.baseWageILS || BASE_WAGE_ILS,
+        idfBonusPercent: state.settings.idfBonusPercent || 0,
+      });
+    } catch (err) {
+      resultBox.innerHTML = `<p class="field-error">${err.message}</p>`;
+      return;
+    }
+
+    const rateRows = [];
+    for (const r of pay.hoursByRate) {
+      if (r.ratePercent === 300) {
+        rateRows.push(`<p>Shabbat hours (200%): <strong>${r.hours}h</strong></p>`);
+        rateRows.push(`<p>Weekly rest addition (100%): <strong>${r.hours}h</strong></p>`);
+      } else {
+        rateRows.push(`<p>Hours at ${r.ratePercent}%: <strong>${r.hours}h</strong></p>`);
+      }
+    }
+    resultBox.innerHTML = `
+      ${rateRows.join("") || `<p class="field-hint">No hours yet — check the times above.</p>`}
+      ${pay.breakMinutesDeducted ? `<p class="field-hint">Unpaid break deducted: ${pay.breakMinutesDeducted} min</p>` : ""}
+      <p class="sim-total">Estimated pay for this shift: ${formatILS(pay.finalPayILS)}</p>
+    `;
+  }
+
+  [dateInput, startInput, endInput].forEach((el) => el.addEventListener("input", recompute));
+  recompute();
+}
+
+function renderSalaryRulesTab(container) {
+  const wage = state.settings.baseWageILS || BASE_WAGE_ILS;
+  const sections = [
+    {
+      title: "💰 Base wage",
+      open: true,
+      body: `<p>Every hour is paid at least the base rate — currently <strong>${formatILS(wage)}/hour</strong> (matches minimum wage unless you've set a different rate in Settings).</p>`,
+    },
+    {
+      title: "🕐 Time-of-day zones",
+      body: `
+        <p>Day (06:00–16:00): <strong>100%</strong></p>
+        <p>Evening (16:00–22:00): <strong>130%</strong></p>
+        <p>Night (22:00–06:00): <strong>150%</strong></p>
+        <p class="field-hint">If a shift reaches far enough into the night window, the WHOLE shift (up to the cap below) is paid at the night rate — not just the part that's literally after 22:00.</p>
+      `,
+    },
+    {
+      title: "🌙 Night cap & overtime",
+      body: `
+        <p>A night shift is paid at 150% for up to <strong>7.08 hours</strong>. Anything beyond that, in the same shift, is paid at <strong>225%</strong>.</p>
+        <p class="field-hint">A night shift shorter than 7.08 hours has no overtime portion at all — the whole thing stays at 150%.</p>
+      `,
+    },
+    {
+      title: "☕ Unpaid break",
+      body: `<p>Any shift longer than 6 hours has <strong>30 minutes</strong> deducted before pay is calculated — taken off the end of the shift (usually the most expensive minutes), not the middle.</p>`,
+    },
+    {
+      title: "🕯️ Shabbat",
+      body: `<p>Hours worked on Shabbat are paid <strong>300%</strong> in total — shown as two parts: <strong>200%</strong> for the Shabbat work itself, plus a <strong>100%</strong> weekly-rest addition.</p>`,
+    },
+    {
+      title: "📈 Seniority bonus (10%)",
+      body: `
+        <p>After 3 months of employment, every month's pay includes a <strong>10% bonus</strong> — but it's calculated from the hours you worked <strong>two months earlier</strong>, not this month.</p>
+        <p class="field-hint">If the base wage changes in between, the bonus is re-priced to today's rate — so it never stays stuck at an old, lower wage.</p>
+      `,
+    },
+  ];
+
+  for (const s of sections) {
+    const details = document.createElement("details");
+    details.className = "card settings-section";
+    if (s.open) details.open = true;
+    details.innerHTML = `
+      <summary class="settings-section-header"><span>${s.title}</span><span class="chevron">▾</span></summary>
+      <div class="settings-section-body">${s.body}</div>
+    `;
+    container.appendChild(details);
+  }
 }
 
 // ---------- pay breakdown (single shift) ----------
@@ -2487,14 +2766,15 @@ function openPayBreakdownModal(punch) {
         rateRows.push([`Hours at ${r.ratePercent}%`, `${r.hours}h`]);
       }
     }
-    const rows = [
-      ...rateRows,
-      ["Before bonus", formatILS(pay.preBonusPayILS)],
-      ["+10% seniority bonus", pay.productivityBonusApplied ? "Applied" : "Not applied"],
-    ];
+    const rows = [...rateRows];
+    if (pay.breakMinutesDeducted) {
+      rows.push(["Unpaid break deducted", `${pay.breakMinutesDeducted} min`]);
+    }
     if (pay.idfBonusPercent) {
       rows.push([`+${pay.idfBonusPercent}% IDF bonus`, "Applied"]);
     }
+    // The +10% seniority bonus isn't part of any single shift — it's a monthly lump
+    // sum based on hours worked two months back (see the monthly breakdown instead).
     rows.push(["Total pay for this shift", formatILS(pay.finalPayILS)]);
     modalBody.innerHTML = rows.map(([label, value]) => `<p>${label}: <strong>${value}</strong></p>`).join("");
   }

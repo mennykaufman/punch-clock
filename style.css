@@ -907,6 +907,13 @@ body {
   color: var(--btn-primary-text);
 }
 
+.sim-total {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--accent-cyan);
+  margin-top: 10px;
+}
+
 .bottom-nav {
   position: fixed;
   bottom: 0;
