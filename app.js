@@ -1178,9 +1178,26 @@ function openUpdateScheduleModal() {
     return;
   }
 
+  const mine = colleagueSchedules.find((s) => s.uid === currentUid);
+  if (mine && mine.shifts && mine.shifts.length) {
+    const lastDate = mine.shifts.reduce((max, s) => (s.dateISO > max ? s.dateISO : max), mine.shifts[0].dateISO);
+    const currentTitle = document.createElement("p");
+    currentTitle.className = "card-title";
+    currentTitle.textContent = `Currently saved: ${mine.shifts.length} shift(s), through ${lastDate}`;
+    const currentList = document.createElement("ul");
+    currentList.className = "list";
+    for (const s of mine.shifts) {
+      const li = document.createElement("li");
+      li.className = "list-item";
+      li.innerHTML = `<div class="list-item-row"><span>${s.dateISO}</span><span>${formatTime(new Date(s.startISO))} - ${formatTime(new Date(s.endISO))}</span></div>${s.role ? `<p class="list-item-sub">${s.role}</p>` : ""}`;
+      currentList.appendChild(li);
+    }
+    modalBody.append(currentTitle, currentList);
+  }
+
   const hint = document.createElement("p");
   hint.className = "field-hint";
-  hint.textContent = "Paste the weekly shift SMS you received below.";
+  hint.textContent = "Paste the weekly shift SMS you received below to update it.";
 
   const textarea = document.createElement("textarea");
   textarea.className = "field-input";
@@ -1240,9 +1257,9 @@ function openUpdateScheduleModal() {
         department: state.settings.department,
         shifts: parsedShifts,
       });
-      closeModal();
       renderWhosOnClock();
       logAnalyticsEvent("schedule_shared", { shift_count: parsedShifts.length });
+      showScheduleSavedConfirmation(parsedShifts);
     } catch (err) {
       console.error("schedule save failed:", err);
       warning.textContent = "Couldn't save — check your connection and try again.";
@@ -1257,6 +1274,20 @@ function openUpdateScheduleModal() {
   cancelBtn.addEventListener("click", closeModal);
 
   modalActions.append(cancelBtn, saveBtn);
+}
+
+function showScheduleSavedConfirmation(shifts) {
+  const lastDate = shifts.reduce((max, s) => (s.dateISO > max ? s.dateISO : max), shifts[0].dateISO);
+  openModal("Schedule updated");
+  const p = document.createElement("p");
+  p.className = "card-title";
+  p.textContent = `✓ Saved ${shifts.length} shift(s), through ${lastDate}`;
+  modalBody.appendChild(p);
+  const doneBtn = document.createElement("button");
+  doneBtn.className = "btn-primary";
+  doneBtn.textContent = "Done";
+  doneBtn.addEventListener("click", closeModal);
+  modalActions.appendChild(doneBtn);
 }
 
 document.getElementById("btn-update-schedule").addEventListener("click", openUpdateScheduleModal);
@@ -1276,6 +1307,7 @@ function renderSettings() {
   document.getElementById("settings-first-name").value = state.settings.firstName || "";
   document.getElementById("settings-last-name").value = state.settings.lastName || "";
   document.getElementById("settings-department").value = state.settings.department || "";
+  document.getElementById("personal-info-saved-hint").textContent = "";
   document.getElementById("settings-base-wage").value = state.settings.baseWageILS || BASE_WAGE_ILS;
   document.getElementById("remind-points-toggle").checked = !!state.settings.remindPointsOnClockOut;
   document.getElementById("track-shift-type-toggle").checked = !!state.settings.trackShiftType;
@@ -1319,20 +1351,26 @@ for (const key of ["hours", "shifts", "pay", "averages", "luba", "export"]) {
   });
 }
 
-document.getElementById("settings-first-name").addEventListener("change", (e) => {
-  state.settings.firstName = e.target.value.trim();
-  saveState();
-});
+document.getElementById("btn-save-personal-info").addEventListener("click", () => {
+  const firstName = document.getElementById("settings-first-name").value.trim();
+  const lastName = document.getElementById("settings-last-name").value.trim();
+  const department = document.getElementById("settings-department").value;
+  const savedHint = document.getElementById("personal-info-saved-hint");
 
-document.getElementById("settings-last-name").addEventListener("change", (e) => {
-  state.settings.lastName = e.target.value.trim();
-  saveState();
-});
+  if (!firstName || !lastName || !department) {
+    savedHint.className = "field-error";
+    savedHint.textContent = "Please fill in all three fields.";
+    return;
+  }
 
-document.getElementById("settings-department").addEventListener("change", (e) => {
-  state.settings.department = e.target.value;
+  state.settings.firstName = firstName;
+  state.settings.lastName = lastName;
+  state.settings.department = department;
   saveState();
-  startDeptScheduleSync(state.settings.department);
+  startDeptScheduleSync(department);
+
+  savedHint.className = "field-hint";
+  savedHint.textContent = "Saved ✓";
 });
 
 document.getElementById("settings-base-wage").addEventListener("change", (e) => {
