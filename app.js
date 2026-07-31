@@ -21,6 +21,7 @@ function defaultState(employmentStartDate = "", idfBonusPercent = 0) {
       firstName: "",
       lastName: "",
       department: "",
+      role: "user", // "user" | "beta" | "admin" — gates access to experimental features like Who's On Clock
       employmentStartDate,
       idfBonusPercent, // 0 = not eligible, else 2 or 3
       productivityBonusOverride: null, // null = auto (3-month rule), true/false = manual override
@@ -147,6 +148,7 @@ function startCloudSync(uidKey) {
     renderSettings();
     applyingRemoteUpdate = false;
     if (state.settings.department !== deptSyncedFor) startDeptScheduleSync(state.settings.department);
+    applyRoleVisibility();
   });
 }
 
@@ -163,6 +165,15 @@ function startDeptScheduleSync(department) {
     colleagueSchedules = docs;
     if (!document.getElementById("screen-whosonclock").hidden) renderWhosOnClock();
   });
+}
+
+// Who's On Clock is gated to beta/admin roles only — everyone else never sees
+// the nav tab at all (not just blocked after tapping it).
+function applyRoleVisibility() {
+  const role = state?.settings?.role || "user";
+  const canSeeWhosOnClock = role === "beta" || role === "admin";
+  document.querySelector('[data-nav="whosonclock"]').hidden = !canSeeWhosOnClock;
+  document.getElementById("nav-beta-badge").hidden = role !== "beta";
 }
 
 tosCheckbox.addEventListener("change", () => {
@@ -218,6 +229,7 @@ btnWelcomeContinue.addEventListener("click", async () => {
     saveLocalCache(currentUid, state);
     startCloudSync(currentUid);
     startDeptScheduleSync(state.settings.department);
+    applyRoleVisibility();
     showAppShell();
     renderHome();
     logAnalyticsEvent("sign_up", { method: "google" });
@@ -240,6 +252,7 @@ async function handleAuthenticatedUser(user) {
       saveLocalCache(currentUid, state);
       startCloudSync(currentUid);
       startDeptScheduleSync(state.settings.department);
+      applyRoleVisibility();
       showAppShell();
       renderHome();
       logAnalyticsEvent("login", { method: "google" });
@@ -256,6 +269,7 @@ async function handleAuthenticatedUser(user) {
       state = cached;
       startCloudSync(currentUid);
       startDeptScheduleSync(state.settings.department);
+      applyRoleVisibility();
       showAppShell();
       renderHome();
     } else {
