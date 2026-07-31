@@ -27,6 +27,7 @@ function defaultState(employmentStartDate = "", idfBonusPercent = 0) {
       lastName: "",
       department: "",
       role: "user", // "user" | "beta" | "admin" — gates access to experimental features like Who's On Clock
+      isFirstLogin: true, // drives the one-time guided tour; existing accounts never get this field, so it's falsy for them
       employmentStartDate,
       idfBonusPercent, // 0 = not eligible, else 2 or 3
       productivityBonusOverride: null, // null = auto (3-month rule), true/false = manual override
@@ -70,7 +71,33 @@ let unsubscribeFeatureFlags = null;
 let featureFlags = { whosOnClock: { user: false, beta: true, admin: true } };
 const KNOWN_FEATURES = { whosOnClock: "Who's in?" };
 
+// ---------- guided tour sandbox ----------
+// Every mutating action in the app already funnels through saveState() —
+// this is the one choke point that needs to know a tour is running, so
+// none of the actual clock-in/shift-pick/points-log business logic needs
+// any tour-awareness at all: it just operates on whatever `state` points to.
+let tourActive = false;
+let tourRealState = null;
+
+function enterTourSandbox() {
+  tourRealState = state;
+  state = JSON.parse(JSON.stringify(state));
+  tourActive = true;
+}
+
+function exitTourSandbox() {
+  state = tourRealState;
+  tourRealState = null;
+  tourActive = false;
+  renderHome();
+  renderHistory();
+  renderCafeteria();
+  renderSettings();
+  if (!document.getElementById("screen-whosonclock").hidden) renderWhosOnClock();
+}
+
 function saveState() {
+  if (tourActive) return; // sandboxed actions during the tour never persist
   if (!currentUid) return;
   if (!applyingRemoteUpdate) state.seq = (state.seq || 0) + 1;
   saveLocalCache(currentUid, state);
@@ -415,6 +442,7 @@ btnWelcomeContinue.addEventListener("click", async () => {
     applyRoleVisibility();
     showAppShell();
     renderHome();
+    if (state.settings.isFirstLogin) startTour();
     logAnalyticsEvent("sign_up", { method: "google" });
   } catch (err) {
     console.error("welcome setup failed:", err);
@@ -443,6 +471,7 @@ async function handleAuthenticatedUser(user) {
       applyRoleVisibility();
       showAppShell();
       renderHome();
+      if (state.settings.isFirstLogin) startTour();
       logAnalyticsEvent("login", { method: "google" });
     } else {
       showWelcomeCard();
@@ -461,6 +490,7 @@ async function handleAuthenticatedUser(user) {
       applyRoleVisibility();
       showAppShell();
       renderHome();
+      if (state.settings.isFirstLogin) startTour();
     } else {
       loginError.textContent = "Couldn't reach the server — check your internet connection and try again.";
       showLoginScreen();
@@ -678,6 +708,15 @@ function promptShiftType(current = "") {
 // Resolves to a chosen shift object, or null if the user cancels.
 function resolveShiftForClockIn(clockInDate) {
   return new Promise((resolve) => {
+    // During the guided tour, always show the full searchable picker instead
+    // of the normal auto-match — guarantees a real, always-present list to
+    // point the tour's step 2 at, regardless of whether "now" happens to be
+    // ambiguous in the real catalog.
+    if (tourActive) {
+      resolveWithManualPicker(resolve);
+      return;
+    }
+
     const match = matchShiftByClockIn(clockInDate);
 
     if (match.matched && match.candidates.length === 1) {
@@ -2274,6 +2313,207 @@ function openPayBreakdownModal(punch) {
   closeBtn.addEventListener("click", closeModal);
   modalActions.appendChild(closeBtn);
 }
+
+// ---------- guided tour ----------
+
+const tourSpotlight = document.getElementById("tour-spotlight");
+const tourTooltip = document.getElementById("tour-tooltip");
+const tourArrow = document.getElementById("tour-arrow");
+const tourTooltipText = document.getElementById("tour-tooltip-text");
+const tourSkipBtn = document.getElementById("tour-skip-btn");
+const tourNextBtn = document.getElementById("tour-next-btn");
+
+let tourStepIndex = -1;
+let tourCleanupFns = [];
+
+const TOUR_STEPS = [
+  {
+    // Step 1: Home — real click on Clock In, then wait for the (guaranteed,
+    // tour-mode) shift picker modal to actually open before advancing.
+    target: () => document.getElementById("btn-clock"),
+    text: "בוא ננסה! לחץ על כפתור הכניסה כדי להתחיל משמרת.",
+    advanceType: "modalOpen",
+  },
+  {
+    // Step 2: the shift picker modal itself (opened by step 1's click).
+    target: () => document.getElementById("modal"),
+    text: "מצוין! כעת בחר את סוג המשמרת שלך לקבלת חישוב שכר ונקודות מדויק.",
+    advanceType: "modalClose",
+  },
+  {
+    // Step 3: point at the Attendance tab and wait for a real tap — the tour
+    // does not navigate here itself.
+    target: () => document.querySelector('[data-nav="history"]'),
+    text: "כל הכבוד! המשמרת באוויר. כאן תוכל לצפות בנתונים בזמן אמת, לערוך שעות או להוסיף הערות.",
+    advanceType: "click",
+  },
+  {
+    // Step 4: tour navigates to Luba itself; informational only.
+    autoNavigateTo: "cafeteria",
+    target: () => document.getElementById("btn-log-points"),
+    text: "השתמשת בנקודות? לחץ כאן כדי לעדכן. מומלץ להגדיר תזכורת במסך ההגדרות בסוף יום כדי לשמור על מעקב מדויק!",
+    advanceType: "manual",
+  },
+  {
+    // Step 5: Who's In — shown as a teaser regardless of the real feature-flag
+    // gating; forces the nav tab visible for the rest of the tour (real gated
+    // visibility is restored only once the whole tour ends, in completeTour()),
+    // and leaves a "Coming soon" ribbon on it once this step ends.
+    autoNavigateTo: "whosonclock",
+    target: () => document.querySelector('[data-nav="whosonclock"]'),
+    text: "תמיד יודעים מי בפנים! גלה מי עובד איתך עכשיו, מי מגיע בהמשך ואיך הלו\"ז שלכם חופף.",
+    advanceType: "manual",
+    onEnter: () => {
+      document.querySelector('[data-nav="whosonclock"]').hidden = false;
+    },
+    onLeave: () => {
+      document.getElementById("woc-coming-soon-badge").hidden = false;
+    },
+  },
+  {
+    // Step 6: Settings — personal info / reminders area.
+    autoNavigateTo: "settings",
+    target: () => document.querySelector(".settings-section"),
+    text: "הגענו להגדרות! כאן תוכל להתאים אישית את תעריפי השכר, התזכורות וההעדפות שלך.",
+    advanceType: "manual",
+  },
+];
+
+function positionTourStep(targetEl) {
+  const rect = targetEl.getBoundingClientRect();
+  const pad = 6;
+  tourSpotlight.style.top = `${rect.top - pad}px`;
+  tourSpotlight.style.left = `${rect.left - pad}px`;
+  tourSpotlight.style.width = `${rect.width + pad * 2}px`;
+  tourSpotlight.style.height = `${rect.height + pad * 2}px`;
+
+  const tooltipWidth = 300;
+  const tooltipHeight = tourTooltip.offsetHeight || 140;
+  const spaceBelow = window.innerHeight - rect.bottom;
+  const goBelow = spaceBelow > tooltipHeight + 30;
+
+  const left = Math.max(12, Math.min(rect.left, window.innerWidth - tooltipWidth - 12));
+  tourTooltip.style.left = `${left}px`;
+  if (goBelow) {
+    tourTooltip.style.top = `${rect.bottom + 24}px`;
+    tourArrow.className = "tour-arrow tour-arrow-up";
+    tourArrow.textContent = "▲";
+  } else {
+    tourTooltip.style.top = `${Math.max(12, rect.top - tooltipHeight - 24)}px`;
+    tourArrow.className = "tour-arrow tour-arrow-down";
+    tourArrow.textContent = "▼";
+  }
+}
+
+function teardownTourStep() {
+  tourCleanupFns.forEach((fn) => fn());
+  tourCleanupFns = [];
+}
+
+function hideTourUI() {
+  tourSpotlight.hidden = true;
+  tourTooltip.hidden = true;
+  teardownTourStep();
+}
+
+function runTourStep(index) {
+  teardownTourStep();
+  const step = TOUR_STEPS[index];
+  if (!step) {
+    finishTour();
+    return;
+  }
+
+  if (step.autoNavigateTo) showScreen(step.autoNavigateTo);
+
+  const target = step.target();
+  if (!target) {
+    // Target genuinely missing (shouldn't happen) — skip rather than get stuck.
+    advanceTour();
+    return;
+  }
+
+  if (step.onEnter) step.onEnter();
+
+  tourTooltipText.textContent = step.text;
+  tourNextBtn.hidden = step.advanceType !== "manual";
+  tourSpotlight.hidden = false;
+  tourTooltip.hidden = false;
+
+  const reposition = () => positionTourStep(target);
+  reposition();
+  window.addEventListener("scroll", reposition, true);
+  window.addEventListener("resize", reposition);
+  tourCleanupFns.push(() => window.removeEventListener("scroll", reposition, true));
+  tourCleanupFns.push(() => window.removeEventListener("resize", reposition));
+
+  if (step.advanceType === "manual") {
+    tourNextBtn.onclick = () => advanceTour();
+  } else if (step.advanceType === "click") {
+    const handler = () => advanceTour();
+    target.addEventListener("click", handler, { once: true });
+    tourCleanupFns.push(() => target.removeEventListener("click", handler));
+  } else if (step.advanceType === "modalOpen" || step.advanceType === "modalClose") {
+    const wantHidden = step.advanceType === "modalOpen" ? false : true;
+    const observer = new MutationObserver(() => {
+      if (modalBackdrop.hidden === wantHidden) advanceTour();
+    });
+    observer.observe(modalBackdrop, { attributes: true, attributeFilter: ["hidden"] });
+    tourCleanupFns.push(() => observer.disconnect());
+  }
+}
+
+function advanceTour() {
+  const finishedStep = TOUR_STEPS[tourStepIndex];
+  if (finishedStep?.onLeave) finishedStep.onLeave();
+  tourStepIndex++;
+  runTourStep(tourStepIndex);
+}
+
+function showTourFinishModal() {
+  openModal("🎉 סיימנו!");
+  const p = document.createElement("p");
+  p.textContent = "אתה מוכן להתחיל לעבוד עם TrackO'clock. בהצלחה!";
+  modalBody.appendChild(p);
+  const doneBtn = document.createElement("button");
+  doneBtn.className = "btn-primary";
+  doneBtn.textContent = "התחל";
+  doneBtn.addEventListener("click", () => {
+    closeModal();
+    completeTour();
+  });
+  modalActions.appendChild(doneBtn);
+}
+
+function completeTour() {
+  document.getElementById("woc-coming-soon-badge").hidden = true;
+  exitTourSandbox();
+  state.settings.isFirstLogin = false;
+  saveState();
+  applyRoleVisibility(); // restores the Who's In tab's real gated visibility now that the tour is over
+}
+
+function finishTour() {
+  hideTourUI();
+  showTourFinishModal();
+}
+
+function skipTour() {
+  hideTourUI();
+  if (!modalBackdrop.hidden) closeModal(); // dismiss a lingering shift-picker (or similar) from mid-tour
+  completeTour();
+}
+
+tourSkipBtn.addEventListener("click", skipTour);
+
+function startTour() {
+  enterTourSandbox();
+  showScreen("home");
+  tourStepIndex = 0;
+  runTourStep(0);
+}
+
+document.getElementById("btn-replay-tour").addEventListener("click", startTour);
 
 // ---------- init ----------
 

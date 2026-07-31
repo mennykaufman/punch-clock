@@ -285,6 +285,7 @@
       <div class="settings-section-body">
       <p class="field-hint" id="signed-in-as"></p>
       <span class="role-badge-inline" id="account-role-badge" hidden></span>
+      <button class="secondary-button" id="btn-replay-tour" type="button">Replay tutorial</button>
       <button class="secondary-button" id="btn-logout" type="button">Log out / Switch user</button>
       <button class="danger-link" id="btn-delete-account" type="button">Delete my account</button>
       </div>
@@ -332,6 +333,7 @@
     <span class="nav-icon nav-icon-emoji">🫂</span>
     <span>Who's in?</span>
     <span class="nav-badge-beta" id="nav-beta-badge" hidden>BETA</span>
+    <span class="woc-coming-soon" id="woc-coming-soon-badge" hidden>Coming soon!</span>
   </button>
   <button class="nav-btn" data-nav="settings" type="button">
     <span class="nav-icon nav-icon-emoji">⚙️</span>
@@ -347,6 +349,17 @@
     <h2 id="modal-title">Title</h2>
     <div id="modal-body"></div>
     <div class="modal-actions" id="modal-actions"></div>
+  </div>
+</div>
+
+<!-- Guided tour overlay: one reusable spotlight + tooltip, repositioned per step -->
+<div id="tour-spotlight" hidden></div>
+<div id="tour-tooltip" hidden>
+  <div class="tour-arrow" id="tour-arrow">▲</div>
+  <p id="tour-tooltip-text"></p>
+  <div class="tour-tooltip-actions">
+    <button type="button" class="btn-plain" id="tour-skip-btn">Skip tour</button>
+    <button type="button" class="btn-primary" id="tour-next-btn" hidden>Next</button>
   </div>
 </div>
 
