@@ -131,22 +131,28 @@ export function distinctStarts() {
   return [...new Set(SHIFT_CATALOG.map((s) => s.start))];
 }
 
-// Given an actual clock-in Date, return every catalog row whose scheduled start falls
-// within windowMinutes of the actual time (wrapping across midnight) — e.g. clocking in
-// at 13:35 with a 30-minute window shows shifts starting 13:05–14:05, not 12:30 or 13:00.
-// If nothing is within the window, the caller should fall back to the full manual list.
-export function matchShiftByClockIn(clockInDate, windowMinutes = 30) {
+// Given an actual clock-in Date, return every catalog row whose scheduled start is
+// closest to the actual time (wrapping across midnight) — e.g. clocking in at 17:42
+// shows only the 18:00 shifts, never a shift starting hours away. A fixed window (the
+// previous approach) could come up empty in the catalog's sparser stretches — e.g. the
+// 15:45→18:00 gap — silently dumping the user into the full unfiltered list, which is
+// exactly the "long list of every shift" complaint this replaces. Picking the nearest
+// start(s) instead always returns a short, relevant set.
+export function matchShiftByClockIn(clockInDate) {
   const actualMinutes = clockInDate.getHours() * 60 + clockInDate.getMinutes();
+
+  let bestDist = Infinity;
+  for (const s of SHIFT_CATALOG) {
+    const dist = Math.abs(toMinutes(s.start) - actualMinutes);
+    bestDist = Math.min(bestDist, dist, 1440 - dist);
+  }
 
   const candidates = SHIFT_CATALOG.filter((s) => {
     const dist = Math.abs(toMinutes(s.start) - actualMinutes);
-    return Math.min(dist, 1440 - dist) <= windowMinutes;
+    return Math.min(dist, 1440 - dist) === bestDist;
   });
 
-  if (!candidates.length) {
-    return { matched: false, candidates: [] };
-  }
-  return { matched: true, candidates };
+  return { candidates };
 }
 
 // Given the shift's start (already fixed at clock-in) and the ACTUAL clock-out time,

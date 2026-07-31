@@ -717,38 +717,35 @@ function resolveShiftForClockIn(clockInDate) {
       return;
     }
 
-    const match = matchShiftByClockIn(clockInDate);
+    const { candidates } = matchShiftByClockIn(clockInDate);
 
-    if (match.matched && match.candidates.length === 1) {
-      resolve(match.candidates[0]);
+    if (candidates.length === 1) {
+      resolve(candidates[0]);
       return;
     }
 
-    if (match.matched && match.candidates.length > 1) {
-      openModal("Which shift is this?");
-      for (const shift of match.candidates) {
-        const btn = document.createElement("button");
-        btn.className = "modal-option";
-        btn.textContent = shiftLabel(shift);
-        btn.addEventListener("click", () => {
-          closeModal();
-          resolve(shift);
-        });
-        modalBody.appendChild(btn);
-      }
-      const cancelBtn = document.createElement("button");
-      cancelBtn.className = "btn-plain";
-      cancelBtn.textContent = "None of these (search all shifts)";
-      cancelBtn.addEventListener("click", () => {
+    // Multiple catalog rows share the nearest start time (e.g. several 18:00 shifts
+    // with different lengths) — show only that short, focused set, with a small
+    // escape hatch at the bottom for the rare case none of them fit.
+    openModal("Which shift is this?");
+    for (const shift of candidates) {
+      const btn = document.createElement("button");
+      btn.className = "modal-option";
+      btn.textContent = shiftLabel(shift);
+      btn.addEventListener("click", () => {
         closeModal();
-        resolveWithManualPicker(resolve);
+        resolve(shift);
       });
-      modalActions.appendChild(cancelBtn);
-      return;
+      modalBody.appendChild(btn);
     }
-
-    // No reasonable auto-match: fall back to full searchable picker.
-    resolveWithManualPicker(resolve);
+    const expandBtn = document.createElement("button");
+    expandBtn.className = "btn-plain";
+    expandBtn.textContent = "Show all shift types";
+    expandBtn.addEventListener("click", () => {
+      closeModal();
+      resolveWithManualPicker(resolve);
+    });
+    modalActions.appendChild(expandBtn);
   });
 }
 
@@ -1456,12 +1453,16 @@ function openUpdateScheduleModal() {
     currentTitle.textContent = `Currently saved: ${mine.shifts.length} shift(s), through ${lastDate}`;
     const currentList = document.createElement("ul");
     currentList.className = "list";
-    for (const s of mine.shifts) {
+    mine.shifts.forEach((s, index) => {
       const li = document.createElement("li");
-      li.className = "list-item";
+      li.className = "list-item is-clickable";
       li.innerHTML = `<div class="list-item-row"><span>${s.dateISO}</span><span>${formatTime(new Date(s.startISO))} - ${formatTime(new Date(s.endISO))}</span></div>${s.role ? `<p class="list-item-sub">${s.role}</p>` : ""}`;
+      li.addEventListener("click", () => {
+        closeModal();
+        openEditScheduleShiftModal(index);
+      });
       currentList.appendChild(li);
-    }
+    });
     modalBody.append(currentTitle, currentList);
   }
 
@@ -1544,6 +1545,127 @@ function openUpdateScheduleModal() {
   cancelBtn.addEventListener("click", closeModal);
 
   modalActions.append(cancelBtn, saveBtn);
+}
+
+// Persists an edited/trimmed copy of the current user's own saved shift list —
+// saveMySchedule always replaces the whole array, so every caller here reads
+// colleagueSchedules fresh (not a captured/stale copy) and writes back the full set.
+async function persistMyShifts(updatedShifts) {
+  await saveMySchedule(currentUid, {
+    displayName: `${state.settings.firstName} ${state.settings.lastName}`.trim(),
+    department: state.settings.department,
+    shifts: updatedShifts,
+  });
+  renderWhosOnClock();
+}
+
+// Edit or remove one shift from the current user's own saved schedule (reached from
+// the "Update your schedule" list on Who's In) — a permanent app feature, not tour-only.
+// Sync (save + re-render) only happens after Save or after confirming removal.
+function openEditScheduleShiftModal(index) {
+  const mine = colleagueSchedules.find((s) => s.uid === currentUid);
+  const shift = mine.shifts[index];
+
+  openModal("Edit shift");
+
+  if (shift.role) {
+    const roleP = document.createElement("p");
+    roleP.className = "list-item-sub";
+    roleP.textContent = shift.role;
+    modalBody.appendChild(roleP);
+  }
+
+  const inLabel = document.createElement("label");
+  inLabel.className = "field-label";
+  inLabel.textContent = "Start";
+  const inInput = document.createElement("input");
+  inInput.className = "field-input";
+  inInput.type = "datetime-local";
+  inInput.value = toDatetimeLocalValue(new Date(shift.startISO));
+
+  const outLabel = document.createElement("label");
+  outLabel.className = "field-label";
+  outLabel.textContent = "End";
+  const outInput = document.createElement("input");
+  outInput.className = "field-input";
+  outInput.type = "datetime-local";
+  outInput.value = toDatetimeLocalValue(new Date(shift.endISO));
+
+  const errorP = document.createElement("p");
+  errorP.className = "field-hint";
+
+  modalBody.append(inLabel, inInput, outLabel, outInput, errorP);
+
+  const saveBtn = document.createElement("button");
+  saveBtn.className = "btn-primary";
+  saveBtn.textContent = "Save";
+  saveBtn.addEventListener("click", async () => {
+    if (!inInput.value || !outInput.value) {
+      errorP.textContent = "Enter both start and end.";
+      return;
+    }
+    const startDate = new Date(inInput.value);
+    const endDate = new Date(outInput.value);
+    if (endDate <= startDate) {
+      errorP.textContent = "End must be after start.";
+      return;
+    }
+
+    const pad = (n) => String(n).padStart(2, "0");
+    const latest = colleagueSchedules.find((s) => s.uid === currentUid);
+    const updatedShifts = [...latest.shifts];
+    updatedShifts[index] = {
+      ...updatedShifts[index],
+      dateISO: `${startDate.getFullYear()}-${pad(startDate.getMonth() + 1)}-${pad(startDate.getDate())}`,
+      startISO: startDate.toISOString(),
+      endISO: endDate.toISOString(),
+    };
+    closeModal();
+    try {
+      await persistMyShifts(updatedShifts);
+    } catch (err) {
+      console.error("schedule shift update failed:", err);
+    }
+  });
+
+  const deleteBtn = document.createElement("button");
+  deleteBtn.className = "btn-danger";
+  deleteBtn.textContent = "Remove shift";
+  deleteBtn.addEventListener("click", () => {
+    closeModal();
+    openModal("Remove this shift?");
+    const p = document.createElement("p");
+    p.textContent = `Remove the ${formatTime(new Date(shift.startISO))} - ${formatTime(new Date(shift.endISO))} shift on ${shift.dateISO}? This can't be undone.`;
+    modalBody.appendChild(p);
+
+    const confirmBtn = document.createElement("button");
+    confirmBtn.className = "btn-danger";
+    confirmBtn.textContent = "Remove shift";
+    confirmBtn.addEventListener("click", async () => {
+      const latest = colleagueSchedules.find((s) => s.uid === currentUid);
+      const updatedShifts = latest.shifts.filter((_, i) => i !== index);
+      closeModal();
+      try {
+        await persistMyShifts(updatedShifts);
+      } catch (err) {
+        console.error("schedule shift removal failed:", err);
+      }
+    });
+
+    const cancelConfirmBtn = document.createElement("button");
+    cancelConfirmBtn.className = "btn-plain";
+    cancelConfirmBtn.textContent = "Cancel";
+    cancelConfirmBtn.addEventListener("click", closeModal);
+
+    modalActions.append(cancelConfirmBtn, confirmBtn);
+  });
+
+  const cancelBtn = document.createElement("button");
+  cancelBtn.className = "btn-plain";
+  cancelBtn.textContent = "Cancel";
+  cancelBtn.addEventListener("click", closeModal);
+
+  modalActions.append(cancelBtn, deleteBtn, saveBtn);
 }
 
 function showScheduleSavedConfirmation(shifts) {
@@ -2344,7 +2466,7 @@ const TOUR_STEPS = [
     // Step 3: point at the Attendance tab and wait for a real tap — the tour
     // does not navigate here itself.
     target: () => document.querySelector('[data-nav="history"]'),
-    text: "כל הכבוד! המשמרת באוויר. כאן תוכל לצפות בנתונים בזמן אמת, לערוך שעות או להוסיף הערות.",
+    text: "כל הכבוד! המשמרת באוויר. כאן תוכל לצפות בנתונים בזמן אמת, וללחוץ על בועת משמרת ספציפית כדי לערוך שעות, לשנות תאריך או להסיר אותה.",
     advanceType: "click",
   },
   {
@@ -2452,6 +2574,7 @@ function hideTourUI() {
   tourSpotlight.hidden = true;
   tourTooltip.hidden = true;
   tourClickBlocker.hidden = true;
+  tourSkipBtn.hidden = true;
   teardownTourStep();
 }
 
@@ -2479,6 +2602,7 @@ function runTourStep(index) {
   tourSpotlight.hidden = false;
   tourTooltip.hidden = false;
   tourClickBlocker.hidden = false;
+  tourSkipBtn.hidden = false;
 
   const hasHole = step.advanceType === "modalOpen" || step.advanceType === "click";
   const reposition = () => positionTourStep(target, hasHole);

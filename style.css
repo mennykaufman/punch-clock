@@ -1092,8 +1092,30 @@ body {
 
 .tour-blocker-band {
   position: fixed;
+  z-index: 90;
   pointer-events: auto;
 }
+
+/* Fixed in a screen corner (never follows the spotlight/tooltip as they move
+   between steps) so it's always in the same reachable spot, above every other
+   tour layer including the click-blocker bands. */
+#tour-skip-btn {
+  position: fixed;
+  top: calc(12px + env(safe-area-inset-top));
+  right: 12px;
+  z-index: 302;
+  padding: 8px 14px;
+  border-radius: 20px;
+  border: 1px solid var(--card-border);
+  background: var(--card-bg);
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+}
+
+#tour-skip-btn[hidden] { display: none; }
 
 #tour-spotlight {
   position: fixed;
