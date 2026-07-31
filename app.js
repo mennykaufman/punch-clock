@@ -343,7 +343,7 @@ function startOfWeek(date) {
 // ---------- navigation ----------
 
 const SCREENS = ["home", "history", "cafeteria", "whosonclock", "settings"];
-const TITLES = { home: "TrackO'clock", history: "Monthly Attendance", cafeteria: "Luba", whosonclock: "Who's On Clock", settings: "Settings" };
+const TITLES = { home: "TrackO'clock", history: "Monthly Attendance", cafeteria: "Luba", whosonclock: "Who's on the Clock", settings: "Settings" };
 
 function showScreen(name) {
   for (const s of SCREENS) {
