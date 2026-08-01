@@ -1164,11 +1164,14 @@ function reconcileOvertimeModelForRole() {
   if (anyChanged) saveState();
 }
 
-// Test-only (admin Salary Simulator): the +10% seniority bonus, computed via the
-// forensically-derived "2-month-lag" model — NOT wired into any real pay calculation
-// (buildPunch, monthly/shift breakdowns) until payroll confirms the rule. Kept here so
-// we can keep comparing it against real payslips as they come in each month.
+// Admin-only estimate (2026-08-01): the +10% seniority bonus, computed via the
+// forensically-derived "2-month-lag" model. Shown in the real monthly total for admin
+// only, clearly labeled as an unconfirmed estimate — payroll hasn't confirmed the exact
+// rule yet, so it's gated by role internally (every call site, including the Salary
+// Simulator's own test display, automatically stays correctly scoped without needing
+// its own role check).
 function computeSeniorityBonusForMonth(monthDate) {
+  if ((state.settings.role || "user") !== "admin") return 0;
   if (!currentProductivityBonusEnabled(monthDate)) return 0;
   const refMonth = new Date(monthDate.getFullYear(), monthDate.getMonth() - 2, 1);
   const refPunches = state.punches.filter((p) => sameMonth(new Date(p.clockOutISO), refMonth));
@@ -1185,7 +1188,8 @@ function computeSeniorityBonusForMonth(monthDate) {
 }
 
 function buildPunch(clockInDate, clockOutDate, shift, pickedShift, shiftType = "") {
-  // The +10% seniority bonus is disabled pending payroll's answer — see payRules.js.
+  // The +10% seniority bonus is never part of a single shift's own pay — it's a monthly
+  // lump sum (see computeSeniorityBonusForMonth), admin-only and still unconfirmed.
   const pay = calculatePay(clockInDate, clockOutDate, {
     idfBonusPercent: state.settings.idfBonusPercent || 0,
     baseWageILS: state.settings.baseWageILS || BASE_WAGE_ILS,
@@ -2365,7 +2369,9 @@ function computeMoreStats(referenceDate = new Date()) {
   const weekHours = sum(weekPunches, "actualHours");
   const weekPay = sum(weekPunches, "payILS");
   const monthHours = sum(monthPunches, "actualHours");
-  const monthPay = sum(monthPunches, "payILS");
+  // Admin-only estimate — see computeSeniorityBonusForMonth (returns 0 for everyone else).
+  const seniorityBonus = computeSeniorityBonusForMonth(referenceDate);
+  const monthPay = sum(monthPunches, "payILS") + seniorityBonus;
   const monthShiftCount = monthPunches.length;
 
   const monthSpending = state.cafeteriaSpending.filter((s) => sameMonth(new Date(s.timestampISO), referenceDate));
@@ -2379,7 +2385,7 @@ function computeMoreStats(referenceDate = new Date()) {
   const { earned, spent, balance } = monthlyBalance(referenceDate);
 
   return {
-    weekHours, weekPay, monthHours, monthPay, monthShiftCount, monthPunches,
+    weekHours, weekPay, monthHours, monthPay, monthShiftCount, monthPunches, seniorityBonus,
     avgHoursPerShift: monthShiftCount ? monthHours / monthShiftCount : 0,
     avgPayPerShift: monthShiftCount ? monthPay / monthShiftCount : 0,
     avgHourlyPay: monthHours ? monthPay / monthHours : 0,
@@ -2715,8 +2721,11 @@ function round2(n) {
 }
 
 // Aggregates every punch's stored per-shift breakdown into one month-wide summary:
-// hours (and ILS) per exact rate percentage, plus the IDF bonus (still per-shift) and
-function computeMonthlyPayBreakdown(monthPunches) {
+// hours (and ILS) per exact rate percentage, the IDF bonus (still per-shift), and the
+// admin-only seniority bonus estimate (a separate monthly lump sum — see
+// computeSeniorityBonusForMonth — based on hours worked two months earlier, not on any
+// of this month's own punches, and 0 for anyone who isn't admin).
+function computeMonthlyPayBreakdown(monthPunches, monthDate) {
   // Keyed by a label (not just the raw percent) so the Shabbat 300% bucket can be
   // split into its two CBA-mandated components — "200% Shabbat hours" + "100%
   // weekly-rest addition" — without colliding with genuine 100%/200% day-rate
@@ -2725,7 +2734,6 @@ function computeMonthlyPayBreakdown(monthPunches) {
                            // OWN wage at the time it was worked, so a later wage change never distorts past months.
   let totalPreBonus = 0;
   let totalIdfAmount = 0;
-  let totalFinal = 0;
   const idfPercentsUsed = new Set();
 
   for (const p of monthPunches) {
@@ -2757,7 +2765,6 @@ function computeMonthlyPayBreakdown(monthPunches) {
 
     totalPreBonus += base;
     totalIdfAmount += afterIdf - base;
-    totalFinal += pay.finalPayILS;
     if (pay.idfBonusPercent) idfPercentsUsed.add(pay.idfBonusPercent);
   }
 
@@ -2770,11 +2777,15 @@ function computeMonthlyPayBreakdown(monthPunches) {
     }))
     .sort((a, b) => a.sortRate - b.sortRate);
 
+  const seniorityBonus = computeSeniorityBonusForMonth(monthDate);
+
   return {
     hoursByRate,
     totalPreBonus: round2(totalPreBonus),
     totalIdfAmount: round2(totalIdfAmount),
-    totalFinal: round2(totalFinal),
+    totalProductivityAmount: seniorityBonus,
+    totalFinal: round2(totalPreBonus + totalIdfAmount + seniorityBonus),
+    anyProductivityBonus: seniorityBonus > 0,
     idfPercentsUsed,
   };
 }
@@ -2783,10 +2794,14 @@ function openMonthlyBreakdownModal(monthPunches, monthDate) {
   const monthLabel = monthDate.toLocaleDateString([], { year: "numeric", month: "long" });
   openModal(`Pay breakdown — ${monthLabel}`);
 
-  if (!monthPunches.length) {
+  // The seniority bonus (admin-only) can be non-zero even in a month with no shifts of
+  // its own (it's based on hours worked two months earlier), so it's always computed —
+  // only the per-shift rate breakdown is skipped when there's nothing this month.
+  const b = computeMonthlyPayBreakdown(monthPunches, monthDate);
+
+  if (!monthPunches.length && !b.totalProductivityAmount) {
     modalBody.innerHTML = `<p class="field-hint">No shifts this month.</p>`;
   } else {
-    const b = computeMonthlyPayBreakdown(monthPunches);
     const rateRows = b.hoursByRate.map((r) => [r.label, `${r.hours}h — ${formatILS(r.amountILS)}`]);
     const idfLabel = b.idfPercentsUsed.size === 1
       ? `+${[...b.idfPercentsUsed][0]}% IDF bonus`
@@ -2794,7 +2809,10 @@ function openMonthlyBreakdownModal(monthPunches, monthDate) {
     const rows = [
       ...rateRows,
       ["Before bonuses", formatILS(b.totalPreBonus)],
-      ["+10% seniority bonus", "Not applied (pending payroll confirmation)"],
+      [
+        "+10% seniority bonus (estimate, unconfirmed)",
+        b.anyProductivityBonus ? formatILS(b.totalProductivityAmount) : "Not applied",
+      ],
       [idfLabel, b.idfPercentsUsed.size ? formatILS(b.totalIdfAmount) : "Not applied"],
       ["Total pay this month", formatILS(b.totalFinal)],
     ];
@@ -2933,7 +2951,7 @@ function renderShiftSimulatorTab(container) {
     resultBox.innerHTML = `
       ${rateRows.join("") || `<p class="field-hint">No hours yet — check the times above.</p>`}
       ${pay.breakMinutesDeducted ? `<p class="field-hint">Unpaid break deducted: ${pay.breakMinutesDeducted} min</p>` : ""}
-      <p class="field-hint">+10% seniority bonus: not applied (pending payroll confirmation)</p>
+      <p class="field-hint">+10% seniority bonus: not shown here — it's a monthly total, not part of any single shift (see the Salary Rules tab)</p>
       <p class="sim-total">Estimated pay for this shift: ${formatILS(pay.finalPayILS)}</p>
     `;
   }
@@ -2977,14 +2995,14 @@ function renderSalaryRulesTab(container) {
       body: `<p>Hours worked on Shabbat are paid <strong>300%</strong> in total.</p>`,
     },
     {
-      title: "📈 Seniority bonus (10%) — testing only",
+      title: "📈 Seniority bonus (10%) — unconfirmed estimate",
       body: (() => {
         const testMonth = new Date();
         const testAmount = computeSeniorityBonusForMonth(testMonth);
         const testLabel = testMonth.toLocaleDateString([], { year: "numeric", month: "long" });
         return `
-          <p class="field-hint">Not applied to your actual pay yet — the exact rule is being confirmed with payroll (see the questions sent to Bar).</p>
-          <p>Model being tested: 10% of hours worked <strong>two months earlier</strong>, re-rated to today's wage.</p>
+          <p class="field-hint">Now included in your real monthly total (admin only) — but the exact rule is still unconfirmed with payroll (see the questions sent to Bar), so treat this as an estimate, not a guarantee.</p>
+          <p>Model: 10% of hours worked <strong>two months earlier</strong>, re-rated to today's wage.</p>
           <p>Estimate for ${testLabel} under this model: <strong>${testAmount > 0 ? formatILS(testAmount) : "₪0.00 (no data two months back, or not yet eligible)"}</strong></p>
         `;
       })(),
@@ -3030,7 +3048,7 @@ function openPayBreakdownModal(punch) {
       rows.push(["Unpaid break deducted", `${pay.breakMinutesDeducted} min`]);
     }
     rows.push(["Before bonus", formatILS(pay.preBonusPayILS)]);
-    rows.push(["+10% seniority bonus", "Not applied (pending payroll confirmation)"]);
+    rows.push(["+10% seniority bonus", "Not a per-shift amount — see the monthly breakdown"]);
     if (pay.idfBonusPercent) {
       rows.push([`+${pay.idfBonusPercent}% IDF bonus`, "Applied"]);
     }
