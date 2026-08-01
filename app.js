@@ -148,6 +148,7 @@ const btnGoogleSignIn = document.getElementById("btn-google-signin");
 const googleSignInCard = document.getElementById("google-signin-card");
 const tosCheckbox = document.getElementById("tos-checkbox");
 const btnViewTos = document.getElementById("btn-view-tos");
+const btnViewTosSettings = document.getElementById("btn-view-tos-settings");
 const welcomeCard = document.getElementById("welcome-card");
 const welcomeFirstName = document.getElementById("welcome-first-name");
 const welcomeLastName = document.getElementById("welcome-last-name");
@@ -617,6 +618,7 @@ tosCheckbox.addEventListener("change", () => {
 });
 
 btnViewTos.addEventListener("click", () => openTermsModal());
+btnViewTosSettings.addEventListener("click", () => openTermsModal());
 
 btnGoogleSignIn.addEventListener("click", async () => {
   loginError.textContent = "";
@@ -903,7 +905,7 @@ function openTermsModal(onClosed) {
       <p><strong>4. חישובי שכר – עקרונות, הנחות ומגבלות</strong><br/>
       מנוע החישוב באפליקציה מבצע חישוב הערכתי בלבד, בהתבסס על הכללים והנחות המפורטים להלן:</p>
       <p>סיווג שעות: שעות עבודה מסווגות אוטומטית לפי טווחי שעון קבועים (יום/ערב/לילה/שבת), לרבות כלל "היפוך לילה" לפיו משמרת החופפת בהיקף מהותי לשעות הלילה עשויה להיות מסווגת כולה כמשמרת לילה.<br/>
-      שעות נוספות: מחושבות לפי מדרגות אחוזים קבועות מראש (למשל 125%/150%), בהתאם לסוג המשמרת.<br/>
+      שעות נוספות: מחושבות לפי מדרגות אחוזים קבועות מראש (למשל 130%/150%), בהתאם לסוג המשמרת.<br/>
       ניכוי הפסקה: משמרות מעל משך זמן מסוים מנוכות אוטומטית בזמן הפסקה בלתי-מתוגמל.<br/>
       בונוס ייעודי (למשל בונוס שירות/מילואים): מחושב לפי האחוז שהוגדר על ידך בהגדרות, ומוכפל על סך השכר המחושב.<br/>
       בונוס ותק: בונוס בשיעור של עד 10% מתווסף לחישוב השכר בהתאם לוותק ולהיקף שעות העבודה המצטבר, לפי קריטריונים הנקבעים על ידי המפתח מעת לעת.<br/>
