@@ -8,9 +8,17 @@
 //  - The +10% seniority ("פריון") bonus is REMOVED from the calculation entirely — we
 //    know the old per-shift model was wrong and don't yet know the right one, so it's
 //    better to show 0 than a confidently-wrong number. Re-add once Bar confirms the rule.
-//  - The unpaid half-hour break deduction IS kept — this one we've confirmed to the
-//    minute against real payslips independent of the other open questions.
+//  - The unpaid half-hour break deduction IS kept by default — this one we've confirmed
+//    to the minute against real payslips independent of the other open questions.
 //  - Base wage 35.40 ILS/hour (or whatever's configured in Settings).
+//
+// options.skipBreakDeduction (admin-only rollout, 2026-08-01): re-verifying June/May
+// against real payslips shows the 425-min night-OT threshold lines up almost exactly
+// with the RAW shift duration, not the post-break "payable" duration — i.e. the unpaid
+// break doesn't shift where overtime starts. With the break subtracted first (the
+// default below), computed 225% hours came out ~9h short of the real June payslip;
+// without it, the gap shrank to under 1h for June and under 6 minutes for May. Still a
+// small unexplained residual, so this is opt-in (admin only) until confirmed further.
 //  - Every minute of the actual worked shift is classified as day/evening/night/shabbat
 //    by real clock time, then overtime is layered on top of that per-minute rate.
 //  - "Night flip": if the shift's overlap with the night window (22:00-06:00, counted
@@ -76,7 +84,7 @@ export function isProductivityBonusEligible(employmentStartDate, today = new Dat
 }
 
 // clockIn/clockOut: real Date objects captured at the moment of punching (clockOut > clockIn).
-// options: { idfBonusPercent: 0|2|3, baseWageILS?: number }
+// options: { idfBonusPercent: 0|2|3, baseWageILS?: number, skipBreakDeduction?: boolean }
 export function calculatePay(clockIn, clockOut, options = {}) {
   const wage = options.baseWageILS > 0 ? options.baseWageILS : BASE_WAGE_ILS;
   const totalMinutes = Math.round((clockOut.getTime() - clockIn.getTime()) / 60000);
@@ -94,10 +102,14 @@ export function calculatePay(clockIn, clockOut, options = {}) {
   const flip = nightOverlapMinutes >= NIGHT_FLIP_THRESHOLD_MINUTES;
   const standardMinutes = flip ? NIGHT_STANDARD_MINUTES : DAY_STANDARD_MINUTES;
 
-  const breakMinutes = totalMinutes > UNPAID_BREAK_THRESHOLD_MINUTES ? UNPAID_BREAK_MINUTES : 0;
+  const breakMinutes = !options.skipBreakDeduction && totalMinutes > UNPAID_BREAK_THRESHOLD_MINUTES
+    ? UNPAID_BREAK_MINUTES
+    : 0;
   // Simply stop counting the last `breakMinutes` minutes of the shift — since the loop
   // below walks forward from clock-in, this naturally lands the deduction on whichever
-  // rate was in effect right at the end, matching how the real payslip does it.
+  // rate was in effect right at the end, matching how the real payslip does it. When
+  // skipBreakDeduction is set, breakMinutes is 0 and the standard/OT split runs over the
+  // shift's full raw duration instead (see the file header for why).
   const payableMinutes = Math.max(0, totalMinutes - breakMinutes);
 
   const hoursByCategory = { day: 0, evening: 0, night: 0, shabbat: 0 };
@@ -172,6 +184,9 @@ export function calculatePay(clockIn, clockOut, options = {}) {
     baseWageILS: wage,
     preBonusPayILS: round2(preBonusPay),
     idfBonusPercent,
+    // Records which OT model produced this result, so a caller can cheaply detect
+    // drift later (e.g. after a role change) without having to recompute to check.
+    skipBreakDeductionApplied: !!options.skipBreakDeduction,
     finalPayILS: round2(finalPay),
   };
 }

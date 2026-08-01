@@ -693,6 +693,7 @@ async function handleAuthenticatedUser(user) {
         saveState();
       }
       migratePunchPayCalculations();
+      reconcileOvertimeModelForRole();
       saveLocalCache(currentUid, state);
       startCloudSync(currentUid);
       startDeptScheduleSync(state.settings.department);
@@ -721,6 +722,7 @@ async function handleAuthenticatedUser(user) {
     if (cached) {
       state = cached;
       migratePunchPayCalculations();
+      reconcileOvertimeModelForRole();
       startCloudSync(currentUid);
       startDeptScheduleSync(state.settings.department);
       startFeatureFlagsSync();
@@ -1095,14 +1097,21 @@ function currentProductivityBonusEnabled(referenceDate = new Date()) {
   return isProductivityBonusEligible(state.settings.employmentStartDate, referenceDate);
 }
 
+// Admin-only rollout of the "skip break deduction before the OT threshold" fix (see
+// payRules.js header) — re-verified against real payslips but with a small unexplained
+// residual, so it's opt-in by role rather than shown to every user yet.
+function usesCorrectedOvertimeModel() {
+  return (state.settings.role || "user") === "admin";
+}
+
 // Every existing punch has its pay FROZEN in payBreakdown/payILS from whenever it was
 // originally saved. This re-runs calculatePay() once over every existing punch (same
 // clock times, same wage/IDF-% each shift already had) so past months reflect whichever
 // formula is currently live. Gated by a version flag bumped whenever the underlying
 // formula changes, so it runs exactly once per account per formula version.
 function migratePunchPayCalculations() {
-  if (state.settings.payRulesMigrationV4 || !state.punches.length) {
-    if (!state.settings.payRulesMigrationV4) state.settings.payRulesMigrationV4 = true;
+  if (state.settings.payRulesMigrationV5 || !state.punches.length) {
+    if (!state.settings.payRulesMigrationV5) state.settings.payRulesMigrationV5 = true;
     return;
   }
   for (const p of state.punches) {
@@ -1114,6 +1123,7 @@ function migratePunchPayCalculations() {
       const recalculated = calculatePay(new Date(p.clockInISO), new Date(p.clockOutISO), {
         baseWageILS: old.baseWageILS,
         idfBonusPercent: old.idfBonusPercent || 0,
+        skipBreakDeduction: usesCorrectedOvertimeModel(),
       });
       p.payBreakdown = recalculated;
       p.payILS = recalculated.finalPayILS;
@@ -1121,8 +1131,37 @@ function migratePunchPayCalculations() {
       console.error("migratePunchPayCalculations: skipping unrecalculable punch", p.id, err);
     }
   }
-  state.settings.payRulesMigrationV4 = true;
+  state.settings.payRulesMigrationV5 = true;
   saveState();
+}
+
+// migratePunchPayCalculations only ever runs ONCE per formula version — but which OT
+// model applies depends on role, and role can change at any time (promotion/demotion),
+// not just when the formula code changes. Without this, a role change would silently
+// leave old punches frozen on whichever model was active when they were last migrated,
+// while new punches (buildPunch checks role live) use the other one — a quiet mismatch
+// within the same account with no error and no visible warning. Runs on every load but
+// is a no-op unless a punch's stored model actually disagrees with the current role.
+function reconcileOvertimeModelForRole() {
+  const wantsCorrectedModel = usesCorrectedOvertimeModel();
+  let anyChanged = false;
+  for (const p of state.punches) {
+    const old = p.payBreakdown;
+    if (!old || !!old.skipBreakDeductionApplied === wantsCorrectedModel) continue;
+    try {
+      const recalculated = calculatePay(new Date(p.clockInISO), new Date(p.clockOutISO), {
+        baseWageILS: old.baseWageILS,
+        idfBonusPercent: old.idfBonusPercent || 0,
+        skipBreakDeduction: wantsCorrectedModel,
+      });
+      p.payBreakdown = recalculated;
+      p.payILS = recalculated.finalPayILS;
+      anyChanged = true;
+    } catch (err) {
+      console.error("reconcileOvertimeModelForRole: skipping unrecalculable punch", p.id, err);
+    }
+  }
+  if (anyChanged) saveState();
 }
 
 // Test-only (admin Salary Simulator): the +10% seniority bonus, computed via the
@@ -1150,6 +1189,7 @@ function buildPunch(clockInDate, clockOutDate, shift, pickedShift, shiftType = "
   const pay = calculatePay(clockInDate, clockOutDate, {
     idfBonusPercent: state.settings.idfBonusPercent || 0,
     baseWageILS: state.settings.baseWageILS || BASE_WAGE_ILS,
+    skipBreakDeduction: usesCorrectedOvertimeModel(),
   });
 
   const punch = {
@@ -2874,6 +2914,7 @@ function renderShiftSimulatorTab(container) {
       pay = calculatePay(clockIn, clockOut, {
         baseWageILS: state.settings.baseWageILS || BASE_WAGE_ILS,
         idfBonusPercent: state.settings.idfBonusPercent || 0,
+        skipBreakDeduction: usesCorrectedOvertimeModel(),
       });
     } catch (err) {
       resultBox.innerHTML = `<p class="field-error">${err.message}</p>`;
@@ -2927,7 +2968,9 @@ function renderSalaryRulesTab(container) {
     },
     {
       title: "☕ Unpaid break",
-      body: `<p>Any shift longer than 6 hours has <strong>30 minutes</strong> deducted before pay is calculated — taken off the end of the shift, not the middle.</p>`,
+      body: usesCorrectedOvertimeModel()
+        ? `<p class="field-hint">Admin-only model change (2026-08-01): the 7h overtime threshold above is now measured against the shift's full raw duration, not duration-minus-break — re-verified against real June/May payslips, much closer than before but not yet a perfect match. Still applies to your real pay.</p>`
+        : `<p>Any shift longer than 6 hours has <strong>30 minutes</strong> deducted before pay is calculated — taken off the end of the shift, not the middle.</p>`,
     },
     {
       title: "🕯️ Shabbat",
