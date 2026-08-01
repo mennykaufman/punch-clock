@@ -859,6 +859,11 @@ function closeModal() {
   // (harmless no-op if the Admin Dashboard wasn't the one open).
   adminDashboardActiveTab = null;
   adminDashboardContentArea = null;
+  // Centralized reset: whichever modal was blocking backdrop-dismiss (if any) is gone
+  // now too, so the next modal always starts dismissable by default. Without this, any
+  // future code path that closes a modal without going through its own "agree" button
+  // would leave backdrop-dismiss permanently disabled for the rest of the session.
+  blockBackdropDismiss = false;
 }
 
 function openModal(title) {
@@ -1051,7 +1056,6 @@ function showTermsReconsentBanner() {
     state.settings.termsAcceptedVersion = TERMS_VERSION;
     state.settings.termsAcceptedAt = new Date().toISOString();
     saveState();
-    blockBackdropDismiss = false;
     closeModal();
   });
 
@@ -1278,9 +1282,9 @@ function currentProductivityBonusEnabled(referenceDate = new Date()) {
   return isProductivityBonusEligible(state.settings.employmentStartDate, referenceDate);
 }
 
-// Admin-only rollout of the "skip break deduction before the OT threshold" fix (see
-// payRules.js header) — re-verified against real payslips but with a small unexplained
-// residual, so it's opt-in by role rather than shown to every user yet.
+// Admin-only rollout of the corrected night-shift thresholds (425min standard, 135min
+// flip — see payRules.js header) — confirmed against one real minute-matched payslip
+// shift so far, so it's opt-in by role rather than shown to every user yet.
 function usesCorrectedOvertimeModel() {
   return (state.settings.role || "user") === "admin";
 }
@@ -1291,8 +1295,8 @@ function usesCorrectedOvertimeModel() {
 // formula is currently live. Gated by a version flag bumped whenever the underlying
 // formula changes, so it runs exactly once per account per formula version.
 function migratePunchPayCalculations() {
-  if (state.settings.payRulesMigrationV5 || !state.punches.length) {
-    if (!state.settings.payRulesMigrationV5) state.settings.payRulesMigrationV5 = true;
+  if (state.settings.payRulesMigrationV6 || !state.punches.length) {
+    if (!state.settings.payRulesMigrationV6) state.settings.payRulesMigrationV6 = true;
     return;
   }
   for (const p of state.punches) {
@@ -1304,7 +1308,7 @@ function migratePunchPayCalculations() {
       const recalculated = calculatePay(new Date(p.clockInISO), new Date(p.clockOutISO), {
         baseWageILS: old.baseWageILS,
         idfBonusPercent: old.idfBonusPercent || 0,
-        skipBreakDeduction: usesCorrectedOvertimeModel(),
+        useUpdatedNightThresholds: usesCorrectedOvertimeModel(),
       });
       p.payBreakdown = recalculated;
       p.payILS = recalculated.finalPayILS;
@@ -1312,7 +1316,7 @@ function migratePunchPayCalculations() {
       console.error("migratePunchPayCalculations: skipping unrecalculable punch", p.id, err);
     }
   }
-  state.settings.payRulesMigrationV5 = true;
+  state.settings.payRulesMigrationV6 = true;
   saveState();
 }
 
@@ -1328,12 +1332,12 @@ function reconcileOvertimeModelForRole() {
   let anyChanged = false;
   for (const p of state.punches) {
     const old = p.payBreakdown;
-    if (!old || !!old.skipBreakDeductionApplied === wantsCorrectedModel) continue;
+    if (!old || !!old.usesUpdatedNightThresholds === wantsCorrectedModel) continue;
     try {
       const recalculated = calculatePay(new Date(p.clockInISO), new Date(p.clockOutISO), {
         baseWageILS: old.baseWageILS,
         idfBonusPercent: old.idfBonusPercent || 0,
-        skipBreakDeduction: wantsCorrectedModel,
+        useUpdatedNightThresholds: wantsCorrectedModel,
       });
       p.payBreakdown = recalculated;
       p.payILS = recalculated.finalPayILS;
@@ -1374,7 +1378,7 @@ function buildPunch(clockInDate, clockOutDate, shift, pickedShift, shiftType = "
   const pay = calculatePay(clockInDate, clockOutDate, {
     idfBonusPercent: state.settings.idfBonusPercent || 0,
     baseWageILS: state.settings.baseWageILS || BASE_WAGE_ILS,
-    skipBreakDeduction: usesCorrectedOvertimeModel(),
+    useUpdatedNightThresholds: usesCorrectedOvertimeModel(),
   });
 
   const punch = {
@@ -3130,7 +3134,7 @@ function renderShiftSimulatorTab(container) {
       pay = calculatePay(clockIn, clockOut, {
         baseWageILS: state.settings.baseWageILS || BASE_WAGE_ILS,
         idfBonusPercent: state.settings.idfBonusPercent || 0,
-        skipBreakDeduction: usesCorrectedOvertimeModel(),
+        useUpdatedNightThresholds: usesCorrectedOvertimeModel(),
       });
     } catch (err) {
       resultBox.innerHTML = `<p class="field-error">${err.message}</p>`;
@@ -3177,16 +3181,15 @@ function renderSalaryRulesTab(container) {
     },
     {
       title: "🌙 Night cap & overtime",
-      body: `
-        <p>A night shift is paid at 150% for up to <strong>7 hours</strong>. Anything beyond that, in the same shift, is paid at <strong>225%</strong>.</p>
-        <p class="field-hint">A night shift shorter than 7 hours has no overtime portion at all — the whole thing stays at 150%.</p>
-      `,
+      body: usesCorrectedOvertimeModel()
+        ? `<p>A night shift is paid at 150% for up to <strong>7 hours and 5 minutes</strong>. Anything beyond that, in the same shift, is paid at <strong>225%</strong>.</p>
+           <p class="field-hint">Admin-only model update (2026-08-01): re-derived from a real June 2026 payslip shift, matched to the minute. A shift also now fully "flips" to the night rate once it overlaps the night window by <strong>2 hours 15 minutes</strong> (was 2h16m). Still based on a single confirmed example.</p>`
+        : `<p>A night shift is paid at 150% for up to <strong>7 hours</strong>. Anything beyond that, in the same shift, is paid at <strong>225%</strong>.</p>
+           <p class="field-hint">A night shift shorter than 7 hours has no overtime portion at all — the whole thing stays at 150%.</p>`,
     },
     {
       title: "☕ Unpaid break",
-      body: usesCorrectedOvertimeModel()
-        ? `<p class="field-hint">Admin-only model change (2026-08-01): the 7h overtime threshold above is now measured against the shift's full raw duration, not duration-minus-break — re-verified against real June/May payslips, much closer than before but not yet a perfect match. Still applies to your real pay.</p>`
-        : `<p>Any shift longer than 6 hours has <strong>30 minutes</strong> deducted before pay is calculated — taken off the end of the shift, not the middle.</p>`,
+      body: `<p>Any shift longer than 6 hours has <strong>30 minutes</strong> deducted before pay is calculated — taken off the end of the shift, not the middle.</p>`,
     },
     {
       title: "🕯️ Shabbat",

@@ -1,33 +1,42 @@
 // Pay calculation engine.
-// Status (2026-08-01): the "corrected" formula from the forensic investigation (425min
-// night standard, unpaid-break deduction, monthly-lagged seniority bonus) showed an
-// 11-15% deviation against real May/June payslips — worse than expected. Pending an
-// official answer from payroll (Bar) on the open questions (night-shift OT threshold,
-// exact Shabbat window, seniority-bonus timing/rate), this file is deliberately reverted
-// to a conservative state:
-//  - The +10% seniority ("פריון") bonus is REMOVED from the calculation entirely — we
-//    know the old per-shift model was wrong and don't yet know the right one, so it's
-//    better to show 0 than a confidently-wrong number. Re-add once Bar confirms the rule.
-//  - The unpaid half-hour break deduction IS kept by default — this one we've confirmed
-//    to the minute against real payslips independent of the other open questions.
-//  - Base wage 35.40 ILS/hour (or whatever's configured in Settings).
-//
-// options.skipBreakDeduction (admin-only rollout, 2026-08-01): re-verifying June/May
-// against real payslips shows the 425-min night-OT threshold lines up almost exactly
-// with the RAW shift duration, not the post-break "payable" duration — i.e. the unpaid
-// break doesn't shift where overtime starts. With the break subtracted first (the
-// default below), computed 225% hours came out ~9h short of the real June payslip;
-// without it, the gap shrank to under 1h for June and under 6 minutes for May. Still a
-// small unexplained residual, so this is opt-in (admin only) until confirmed further.
+// Status (2026-08-01): direct line-by-line verification against real June 2026 payslips
+// (base wage, per-code rate x quantity = amount, and individual shifts cross-checked to
+// the minute against the attendance report) confirmed the following against the CURRENT
+// default model, with no changes needed:
+//  - Base wage = statutory minimum wage (not the lower contractual rate before the
+//    employer's minimum-wage top-up) — whatever's configured in Settings.
+//  - Time-of-day rates: day 100%, evening 130%, night 150%.
+//  - Shabbat: 200% "Shabbat" rate + 100% "weekly rest" addition = flat 300%, matching this
+//    file's single shabbat:3.0 rate exactly (the real payslip just splits it into two
+//    line items for reporting; the total is identical either way).
+//  - Shabbat window: Friday 16:00 through Sunday 06:00 — matches isInShabbatWindow below
+//    exactly, confirmed directly rather than re-derived.
+//  - Unpaid break: 30 minutes, deducted from the tail end of any shift over 6h.
+//  - Day/evening boundary at 16:00.
+// One real discrepancy was found and confirmed against a real night shift (1 June 2026,
+// clock-in 12:34 -> clock-out 00:23): the night-shift standard-hours threshold before the
+// 225% overtime rate starts is 425 minutes (7h05m), not 420 (7h00m) — computed hours
+// matched the payslip's 7.08h standard / 4.23h overtime split to within rounding once the
+// existing 30-minute break deduction was applied FIRST and the 425-min threshold checked
+// against the post-break duration (not the raw duration — the previous admin-only
+// "skipBreakDeduction" experiment tried skipping the break instead and is now superseded/
+// removed). The night-flip threshold was also corrected from 136 to 135 minutes (2h15m,
+// not 2h16m) per the same conversation. Both corrections are still based on a single
+// confirmed data point each, so they're gated admin-only (see
+// options.useUpdatedNightThresholds) rather than shown to every user yet.
+//  - The +10% seniority ("פריון") bonus is REMOVED from the calculation entirely — still
+//    unconfirmed pending payroll's (Bar's) answer. Re-add once confirmed.
 //  - Every minute of the actual worked shift is classified as day/evening/night/shabbat
 //    by real clock time, then overtime is layered on top of that per-minute rate.
 //  - "Night flip": if the shift's overlap with the night window (22:00-06:00, counted
 //    across the whole shift, including minutes that are also inside the Shabbat window)
-//    is >= 2h16m, every NON-Shabbat minute is reclassified to night rate. Evening minutes
-//    never contribute to this threshold and never trigger a flip on their own.
+//    is >= the flip threshold, every NON-Shabbat minute is reclassified to night rate.
+//    Evening minutes never contribute to this threshold and never trigger a flip on their
+//    own.
 //  - Overtime: day-classified shifts get a 8h/day standard (hours 9-10 = x1.25, 11+ = x1.5,
-//    the classic two-step Israeli law). Night-classified (flipped) shifts get a 7h standard
-//    with a single x1.5 bump beyond that.
+//    the classic two-step Israeli law — still unconfirmed, no real day-shift-with-overtime
+//    example seen yet). Night-classified (flipped) shifts get a 7h (or 7h05m, admin-only)
+//    standard with a single x1.5 bump beyond that.
 //  - Shabbat minutes are always flat 300%, never bumped by overtime.
 
 export const BASE_WAGE_ILS = 35.4;
@@ -39,9 +48,14 @@ const RATE = {
   shabbat: 3.0,
 };
 
-const NIGHT_FLIP_THRESHOLD_MINUTES = 136; // 2h16m
+const NIGHT_FLIP_THRESHOLD_MINUTES = 136; // 2h16m (default, shown to every user)
+const NIGHT_STANDARD_MINUTES = 7 * 60; // 7h (default, shown to every user)
+// Admin-only (2026-08-01): re-derived from a real, minute-matched June 2026 payslip
+// shift — see file header. Still a single confirmed data point, so not yet the default.
+const NIGHT_FLIP_THRESHOLD_MINUTES_V2 = 135; // 2h15m
+const NIGHT_STANDARD_MINUTES_V2 = 425; // 7h05m
+
 const DAY_STANDARD_MINUTES = 8 * 60;
-const NIGHT_STANDARD_MINUTES = 7 * 60;
 const DAY_OT_TIER1_MINUTES = 2 * 60; // hours 9-10
 const UNPAID_BREAK_THRESHOLD_MINUTES = 6 * 60; // shifts longer than this lose an unpaid break
 const UNPAID_BREAK_MINUTES = 30; // deducted from the shift's tail end, not the middle
@@ -84,7 +98,7 @@ export function isProductivityBonusEligible(employmentStartDate, today = new Dat
 }
 
 // clockIn/clockOut: real Date objects captured at the moment of punching (clockOut > clockIn).
-// options: { idfBonusPercent: 0|2|3, baseWageILS?: number, skipBreakDeduction?: boolean }
+// options: { idfBonusPercent: 0|2|3, baseWageILS?: number, useUpdatedNightThresholds?: boolean }
 export function calculatePay(clockIn, clockOut, options = {}) {
   const wage = options.baseWageILS > 0 ? options.baseWageILS : BASE_WAGE_ILS;
   const totalMinutes = Math.round((clockOut.getTime() - clockIn.getTime()) / 60000);
@@ -94,22 +108,26 @@ export function calculatePay(clockIn, clockOut, options = {}) {
     throw new Error("clockOut must be after clockIn");
   }
 
+  const useUpdatedNightThresholds = !!options.useUpdatedNightThresholds;
+  const nightFlipThresholdMinutes = useUpdatedNightThresholds
+    ? NIGHT_FLIP_THRESHOLD_MINUTES_V2
+    : NIGHT_FLIP_THRESHOLD_MINUTES;
+  const nightStandardMinutes = useUpdatedNightThresholds ? NIGHT_STANDARD_MINUTES_V2 : NIGHT_STANDARD_MINUTES;
+
   let nightOverlapMinutes = 0;
   for (let i = 0; i < totalMinutes; i++) {
     const t = new Date(clockIn.getTime() + i * 60000);
     if (isInNightWindow(t)) nightOverlapMinutes++;
   }
-  const flip = nightOverlapMinutes >= NIGHT_FLIP_THRESHOLD_MINUTES;
-  const standardMinutes = flip ? NIGHT_STANDARD_MINUTES : DAY_STANDARD_MINUTES;
+  const flip = nightOverlapMinutes >= nightFlipThresholdMinutes;
+  const standardMinutes = flip ? nightStandardMinutes : DAY_STANDARD_MINUTES;
 
-  const breakMinutes = !options.skipBreakDeduction && totalMinutes > UNPAID_BREAK_THRESHOLD_MINUTES
-    ? UNPAID_BREAK_MINUTES
-    : 0;
+  // Confirmed against real payslip data: the unpaid break is always deducted (there's no
+  // scenario where it isn't), taken off the tail end of any shift over 6h.
+  const breakMinutes = totalMinutes > UNPAID_BREAK_THRESHOLD_MINUTES ? UNPAID_BREAK_MINUTES : 0;
   // Simply stop counting the last `breakMinutes` minutes of the shift — since the loop
   // below walks forward from clock-in, this naturally lands the deduction on whichever
-  // rate was in effect right at the end, matching how the real payslip does it. When
-  // skipBreakDeduction is set, breakMinutes is 0 and the standard/OT split runs over the
-  // shift's full raw duration instead (see the file header for why).
+  // rate was in effect right at the end, matching how the real payslip does it.
   const payableMinutes = Math.max(0, totalMinutes - breakMinutes);
 
   const hoursByCategory = { day: 0, evening: 0, night: 0, shabbat: 0 };
@@ -186,7 +204,7 @@ export function calculatePay(clockIn, clockOut, options = {}) {
     idfBonusPercent,
     // Records which OT model produced this result, so a caller can cheaply detect
     // drift later (e.g. after a role change) without having to recompute to check.
-    skipBreakDeductionApplied: !!options.skipBreakDeduction,
+    usesUpdatedNightThresholds: useUpdatedNightThresholds,
     finalPayILS: round2(finalPay),
   };
 }

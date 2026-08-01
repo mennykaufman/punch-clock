@@ -1,4 +1,4 @@
-const CACHE_NAME = "punchclock-v53";
+const CACHE_NAME = "punchclock-v54";
 const APP_SHELL = [
   "./",
   "./index.html",
