@@ -1,5 +1,15 @@
 // Pay calculation engine.
-// Rules confirmed against real El Al payslips + attendance reports (Feb-June 2026):
+// Status (2026-08-01): the "corrected" formula from the forensic investigation (425min
+// night standard, unpaid-break deduction, monthly-lagged seniority bonus) showed an
+// 11-15% deviation against real May/June payslips — worse than expected. Pending an
+// official answer from payroll (Bar) on the open questions (night-shift OT threshold,
+// exact Shabbat window, seniority-bonus timing/rate), this file is deliberately reverted
+// to a conservative state:
+//  - The +10% seniority ("פריון") bonus is REMOVED from the calculation entirely — we
+//    know the old per-shift model was wrong and don't yet know the right one, so it's
+//    better to show 0 than a confidently-wrong number. Re-add once Bar confirms the rule.
+//  - The unpaid half-hour break deduction IS kept — this one we've confirmed to the
+//    minute against real payslips independent of the other open questions.
 //  - Base wage 35.40 ILS/hour (or whatever's configured in Settings).
 //  - Every minute of the actual worked shift is classified as day/evening/night/shabbat
 //    by real clock time, then overtime is layered on top of that per-minute rate.
@@ -7,19 +17,10 @@
 //    across the whole shift, including minutes that are also inside the Shabbat window)
 //    is >= 2h16m, every NON-Shabbat minute is reclassified to night rate. Evening minutes
 //    never contribute to this threshold and never trigger a flip on their own.
-//  - Night-shift standard is 7h05m (425 minutes, confirmed exactly against ~25 real shifts
-//    across 3 separate months — always shows as "7.08" hours on the payslip). A shift
-//    shorter than that (after the break deduction below) simply has no overtime portion
-//    at all; everything stays at the night rate. Day-standard shifts get the classic
-//    two-step Israeli overtime (hours 9-10 = x1.25, 11+ = x1.5).
-//  - Unpaid break: any shift longer than 6 hours has 30 minutes deducted from its tail end
-//    (the latest, and therefore usually most expensive, minutes) before the standard/
-//    overtime split — confirmed exact-to-the-minute against every multi-hour shift checked.
-//  - Shabbat minutes are always flat 300% (shown as two payslip lines: 200% Shabbat +
-//    100% weekly-rest addition), never bumped by overtime.
-//  - The +10% "פריון"/seniority bonus is NOT part of a single shift's pay at all — see
-//    computeSeniorityBonusForMonth in app.js. It's a once-a-month lump sum based on hours
-//    worked two months earlier, re-rated to the current wage.
+//  - Overtime: day-classified shifts get a 8h/day standard (hours 9-10 = x1.25, 11+ = x1.5,
+//    the classic two-step Israeli law). Night-classified (flipped) shifts get a 7h standard
+//    with a single x1.5 bump beyond that.
+//  - Shabbat minutes are always flat 300%, never bumped by overtime.
 
 export const BASE_WAGE_ILS = 35.4;
 
@@ -32,7 +33,7 @@ const RATE = {
 
 const NIGHT_FLIP_THRESHOLD_MINUTES = 136; // 2h16m
 const DAY_STANDARD_MINUTES = 8 * 60;
-const NIGHT_STANDARD_MINUTES = 425; // 7h05m
+const NIGHT_STANDARD_MINUTES = 7 * 60;
 const DAY_OT_TIER1_MINUTES = 2 * 60; // hours 9-10
 const UNPAID_BREAK_THRESHOLD_MINUTES = 6 * 60; // shifts longer than this lose an unpaid break
 const UNPAID_BREAK_MINUTES = 30; // deducted from the shift's tail end, not the middle
@@ -63,8 +64,9 @@ function round2(n) {
   return Math.round(n * 100) / 100;
 }
 
-// today/startDate: Date objects (or anything `new Date(x)` accepts). Used to gate the
-// monthly seniority bonus (see app.js) — no longer used per-shift.
+// today/startDate: Date objects (or anything `new Date(x)` accepts).
+// Kept for the Settings "eligible after 3 months" display — not used by calculatePay
+// right now, since the bonus itself is disabled pending payroll's answer.
 export function isProductivityBonusEligible(employmentStartDate, today = new Date()) {
   if (!employmentStartDate) return false;
   const start = new Date(employmentStartDate);
@@ -79,8 +81,7 @@ export function calculatePay(clockIn, clockOut, options = {}) {
   const wage = options.baseWageILS > 0 ? options.baseWageILS : BASE_WAGE_ILS;
   const totalMinutes = Math.round((clockOut.getTime() - clockIn.getTime()) / 60000);
   // Number.isFinite (not just <= 0) so an invalid Date or NaN input throws here loudly
-  // instead of silently producing a zero-hours, zero-pay result further down — every
-  // caller with a try/catch (the Shift Simulator included) already handles this.
+  // instead of silently producing a zero-hours, zero-pay result further down.
   if (!Number.isFinite(totalMinutes) || totalMinutes <= 0) {
     throw new Error("clockOut must be after clockIn");
   }
@@ -146,6 +147,7 @@ export function calculatePay(clockIn, clockOut, options = {}) {
     .map(([rate, minutes]) => ({ ratePercent: Number(rate), hours: round2(minutes / 60) }))
     .sort((a, b) => a.ratePercent - b.ratePercent);
 
+  // No seniority bonus applied — disabled pending payroll's answer (see file header).
   const idfBonusPercent = options.idfBonusPercent > 0 ? options.idfBonusPercent : 0;
   const finalPay = preBonusPay * (1 + idfBonusPercent / 100);
 
