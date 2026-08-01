@@ -1979,37 +1979,24 @@ function openEditScheduleShiftModal(index) {
     modalBody.appendChild(roleP);
   }
 
-  const inLabel = document.createElement("label");
-  inLabel.className = "field-label";
-  inLabel.textContent = "Start";
-  const inInput = document.createElement("input");
-  inInput.className = "field-input";
-  inInput.type = "datetime-local";
-  inInput.value = toDatetimeLocalValue(new Date(shift.startISO));
-
-  const outLabel = document.createElement("label");
-  outLabel.className = "field-label";
-  outLabel.textContent = "End";
-  const outInput = document.createElement("input");
-  outInput.className = "field-input";
-  outInput.type = "datetime-local";
-  outInput.value = toDatetimeLocalValue(new Date(shift.endISO));
+  const inFields = createDateTimeFields("Start", new Date(shift.startISO));
+  const outFields = createDateTimeFields("End", new Date(shift.endISO));
 
   const errorP = document.createElement("p");
   errorP.className = "field-hint";
 
-  modalBody.append(inLabel, inInput, outLabel, outInput, errorP);
+  modalBody.append(inFields.label, inFields.dateInput, inFields.timeInput, outFields.label, outFields.dateInput, outFields.timeInput, errorP);
 
   const saveBtn = document.createElement("button");
   saveBtn.className = "btn-primary";
   saveBtn.textContent = "Save";
   saveBtn.addEventListener("click", async () => {
-    if (!inInput.value || !outInput.value) {
-      errorP.textContent = "Enter both start and end.";
+    const startDate = parseDateTimeFields(inFields.dateInput, inFields.timeInput);
+    const endDate = parseDateTimeFields(outFields.dateInput, outFields.timeInput);
+    if (!startDate || !endDate) {
+      errorP.textContent = "Enter both start and end as a valid date and time (HH:MM).";
       return;
     }
-    const startDate = new Date(inInput.value);
-    const endDate = new Date(outInput.value);
     if (endDate <= startDate) {
       errorP.textContent = "End must be after start.";
       return;
@@ -2353,9 +2340,55 @@ function openDeleteAccountModal() {
 
 // ---------- "More": monthly summary + manual shift entry ----------
 
-function toDatetimeLocalValue(date) {
+// Native <input type="time">/"datetime-local"> widgets render 12h/24h per the BROWSER's
+// own locale, which can silently ignore the device's "24-hour clock" system setting
+// (a known quirk, especially on mobile Safari) — so every shift-editing time field uses
+// a plain 24h "HH:MM" text input instead, paired with a separate <input type="date">.
+const TIME_24H_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
+
+function formatDateInputValue(date) {
   const pad = (n) => String(n).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+function formatTimeInputValue(date) {
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+// Builds a labeled [date input, 24h time-text input] pair, pre-filled from initialDate
+// if given. Returns the pieces the caller needs to append to the modal and to read back.
+function createDateTimeFields(labelText, initialDate) {
+  const label = document.createElement("label");
+  label.className = "field-label";
+  label.textContent = labelText;
+
+  const dateInput = document.createElement("input");
+  dateInput.className = "field-input";
+  dateInput.type = "date";
+
+  const timeInput = document.createElement("input");
+  timeInput.className = "field-input";
+  timeInput.type = "text";
+  timeInput.placeholder = "HH:MM (24h)";
+  timeInput.inputMode = "numeric";
+  timeInput.maxLength = 5;
+
+  if (initialDate) {
+    dateInput.value = formatDateInputValue(initialDate);
+    timeInput.value = formatTimeInputValue(initialDate);
+  }
+
+  return { label, dateInput, timeInput };
+}
+
+// Returns a real Date built from the pair, or null if either field is empty/invalid —
+// callers show their own "enter both..." message rather than this throwing.
+function parseDateTimeFields(dateInput, timeInput) {
+  if (!dateInput.value || !TIME_24H_RE.test(timeInput.value)) return null;
+  const [y, mo, d] = dateInput.value.split("-").map(Number);
+  const [h, m] = timeInput.value.split(":").map(Number);
+  return new Date(y, mo - 1, d, h, m);
 }
 
 function computeMoreStats(referenceDate = new Date()) {
@@ -2528,35 +2561,24 @@ document.getElementById("btn-open-more").addEventListener("click", openMoreModal
 function openManualEntryModal() {
   openModal("Add shift manually");
 
-  const inLabel = document.createElement("label");
-  inLabel.className = "field-label";
-  inLabel.textContent = "Clock in";
-  const inInput = document.createElement("input");
-  inInput.className = "field-input";
-  inInput.type = "datetime-local";
-
-  const outLabel = document.createElement("label");
-  outLabel.className = "field-label";
-  outLabel.textContent = "Clock out";
-  const outInput = document.createElement("input");
-  outInput.className = "field-input";
-  outInput.type = "datetime-local";
+  const inFields = createDateTimeFields("Clock in");
+  const outFields = createDateTimeFields("Clock out");
 
   const errorP = document.createElement("p");
   errorP.className = "field-hint";
 
-  modalBody.append(inLabel, inInput, outLabel, outInput, errorP);
+  modalBody.append(inFields.label, inFields.dateInput, inFields.timeInput, outFields.label, outFields.dateInput, outFields.timeInput, errorP);
 
   const saveBtn = document.createElement("button");
   saveBtn.className = "btn-primary";
   saveBtn.textContent = "Continue";
   saveBtn.addEventListener("click", async () => {
-    if (!inInput.value || !outInput.value) {
-      errorP.textContent = "Enter both clock-in and clock-out.";
+    const clockInDate = parseDateTimeFields(inFields.dateInput, inFields.timeInput);
+    const clockOutDate = parseDateTimeFields(outFields.dateInput, outFields.timeInput);
+    if (!clockInDate || !clockOutDate) {
+      errorP.textContent = "Enter both clock-in and clock-out as a valid date and time (HH:MM).";
       return;
     }
-    const clockInDate = new Date(inInput.value);
-    const clockOutDate = new Date(outInput.value);
     if (clockOutDate <= clockInDate) {
       errorP.textContent = "Clock out must be after clock in.";
       return;
@@ -2593,26 +2615,13 @@ function openEditPunchModal(punch) {
   summary.querySelector(".breakdown-link").addEventListener("click", () => openPayBreakdownModal(punch));
   modalBody.appendChild(summary);
 
-  const inLabel = document.createElement("label");
-  inLabel.className = "field-label";
-  inLabel.textContent = "Clock in";
-  const inInput = document.createElement("input");
-  inInput.className = "field-input";
-  inInput.type = "datetime-local";
-  inInput.value = toDatetimeLocalValue(new Date(punch.clockInISO));
-
-  const outLabel = document.createElement("label");
-  outLabel.className = "field-label";
-  outLabel.textContent = "Clock out";
-  const outInput = document.createElement("input");
-  outInput.className = "field-input";
-  outInput.type = "datetime-local";
-  outInput.value = toDatetimeLocalValue(new Date(punch.clockOutISO));
+  const inFields = createDateTimeFields("Clock in", new Date(punch.clockInISO));
+  const outFields = createDateTimeFields("Clock out", new Date(punch.clockOutISO));
 
   const errorP = document.createElement("p");
   errorP.className = "field-hint";
 
-  modalBody.append(inLabel, inInput, outLabel, outInput, errorP);
+  modalBody.append(inFields.label, inFields.dateInput, inFields.timeInput, outFields.label, outFields.dateInput, outFields.timeInput, errorP);
 
   let editedShiftType = punch.shiftType || "";
   if (state.settings.trackShiftType) {
@@ -2636,12 +2645,12 @@ function openEditPunchModal(punch) {
   saveBtn.className = "btn-primary";
   saveBtn.textContent = "Save";
   saveBtn.addEventListener("click", async () => {
-    if (!inInput.value || !outInput.value) {
-      errorP.textContent = "Enter both clock-in and clock-out.";
+    const clockInDate = parseDateTimeFields(inFields.dateInput, inFields.timeInput);
+    const clockOutDate = parseDateTimeFields(outFields.dateInput, outFields.timeInput);
+    if (!clockInDate || !clockOutDate) {
+      errorP.textContent = "Enter both clock-in and clock-out as a valid date and time (HH:MM).";
       return;
     }
-    const clockInDate = new Date(inInput.value);
-    const clockOutDate = new Date(outInput.value);
     if (clockOutDate <= clockInDate) {
       errorP.textContent = "Clock out must be after clock in.";
       return;
@@ -2899,7 +2908,10 @@ function renderShiftSimulatorTab(container) {
   startLabel.textContent = "Start time";
   const startInput = document.createElement("input");
   startInput.className = "field-input";
-  startInput.type = "time";
+  startInput.type = "text";
+  startInput.placeholder = "HH:MM (24h)";
+  startInput.inputMode = "numeric";
+  startInput.maxLength = 5;
   startInput.value = "12:00";
 
   const endLabel = document.createElement("label");
@@ -2907,7 +2919,10 @@ function renderShiftSimulatorTab(container) {
   endLabel.textContent = "End time";
   const endInput = document.createElement("input");
   endInput.className = "field-input";
-  endInput.type = "time";
+  endInput.type = "text";
+  endInput.placeholder = "HH:MM (24h)";
+  endInput.inputMode = "numeric";
+  endInput.maxLength = 5;
   endInput.value = "20:00";
 
   const resultBox = document.createElement("div");
@@ -2919,8 +2934,8 @@ function renderShiftSimulatorTab(container) {
   container.append(dateLabel, dateInput, startLabel, startInput, endLabel, endInput, resultBox, hint);
 
   function recompute() {
-    if (!dateInput.value || !startInput.value || !endInput.value) {
-      resultBox.innerHTML = `<p class="field-hint">Enter a date, start time, and end time.</p>`;
+    if (!dateInput.value || !TIME_24H_RE.test(startInput.value) || !TIME_24H_RE.test(endInput.value)) {
+      resultBox.innerHTML = `<p class="field-hint">Enter a date, start time, and end time (HH:MM, 24h).</p>`;
       return;
     }
     const clockIn = new Date(`${dateInput.value}T${startInput.value}`);
