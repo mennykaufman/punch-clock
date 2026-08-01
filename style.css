@@ -988,7 +988,6 @@ body {
 }
 
 .nav-badge-beta.role-beta { background: var(--accent-cyan); }
-.nav-badge-beta.role-admin { background: linear-gradient(135deg, #B8860B, #6B21A8); }
 .nav-badge-beta[hidden] { display: none; }
 
 .role-badge-inline {

@@ -242,22 +242,31 @@ function startFeatureFlagsSync() {
   });
 }
 
+// Shared by every feature-flag gated feature (Who's In, Salary Simulator, and any
+// future one): a feature enabled for "beta" is automatically visible to admin too
+// (admin always sees everything a beta tester can), even if its own "admin" toggle
+// was never separately switched on.
+function canSeeFeature(key, role) {
+  const flags = featureFlags[key] || {};
+  return !!flags[role] || (role === "admin" && !!flags.beta);
+}
+
 // Who's On Clock's visibility (and any future gated feature) is looked up
 // dynamically from featureFlags rather than hardcoded, so an admin can widen
 // or narrow the rollout from the Feature Flags panel without a code change.
+// A feature enabled for "beta" always carries just the "BETA" tag — admin never gets
+// its own separate "ADMIN" label on a per-feature nav badge like this one.
 function applyRoleVisibility() {
   const role = state?.settings?.role || "user";
-  const canSeeWhosOnClock = !!featureFlags.whosOnClock?.[role];
-  document.querySelector('[data-nav="whosonclock"]').hidden = !canSeeWhosOnClock;
+  const wocFlags = featureFlags.whosOnClock || {};
+  document.querySelector('[data-nav="whosonclock"]').hidden = !canSeeFeature("whosOnClock", role);
 
   const navBadge = document.getElementById("nav-beta-badge");
-  const isBetaOrAdmin = role === "beta" || role === "admin";
-  navBadge.hidden = !isBetaOrAdmin;
-  navBadge.textContent = role === "admin" ? "ADMIN" : "BETA";
-  navBadge.classList.toggle("role-admin", role === "admin");
-  navBadge.classList.toggle("role-beta", role !== "admin");
+  navBadge.hidden = !wocFlags.beta;
+  navBadge.textContent = "BETA";
 
   const accountBadge = document.getElementById("account-role-badge");
+  const isBetaOrAdmin = role === "beta" || role === "admin";
   accountBadge.hidden = !isBetaOrAdmin;
   accountBadge.textContent = role === "admin" ? "ADMIN" : "BETA";
   accountBadge.classList.toggle("role-admin", role === "admin");
@@ -922,12 +931,18 @@ function migratePunchPayCalculations() {
   for (const p of state.punches) {
     const old = p.payBreakdown;
     if (!old) continue;
-    const recalculated = calculatePay(new Date(p.clockInISO), new Date(p.clockOutISO), {
-      baseWageILS: old.baseWageILS,
-      idfBonusPercent: old.idfBonusPercent || 0,
-    });
-    p.payBreakdown = recalculated;
-    p.payILS = recalculated.finalPayILS;
+    // One malformed record (corrupted dates, etc.) must not abort migration for every
+    // other punch, or block this user from ever completing sign-in again.
+    try {
+      const recalculated = calculatePay(new Date(p.clockInISO), new Date(p.clockOutISO), {
+        baseWageILS: old.baseWageILS,
+        idfBonusPercent: old.idfBonusPercent || 0,
+      });
+      p.payBreakdown = recalculated;
+      p.payILS = recalculated.finalPayILS;
+    } catch (err) {
+      console.error("migratePunchPayCalculations: skipping unrecalculable punch", p.id, err);
+    }
   }
   state.settings.payRulesMigrationV4 = true;
   saveState();
@@ -2581,7 +2596,7 @@ function openMonthlyBreakdownModal(monthPunches, monthDate) {
   // Gated behind a feature flag (admin-only for now) while the underlying pay
   // formula is being re-verified against real payslips with payroll's help.
   const role = state?.settings?.role || "user";
-  if (featureFlags.salarySimulator?.[role]) {
+  if (canSeeFeature("salarySimulator", role)) {
     const calcBtn = document.createElement("button");
     calcBtn.className = "btn-plain";
     calcBtn.textContent = "🧮 Salary Simulator";
