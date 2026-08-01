@@ -15,7 +15,8 @@ import {
   updateUserRole,
   setUserActive,
   subscribeToFeatureFlags,
-  updateFeatureFlag,
+  setFeatureFlagLevel,
+  sendResetPasswordEmail,
 } from "./data/cloud.js";
 import { parseScheduleSms } from "./data/scheduleParser.js";
 
@@ -238,7 +239,7 @@ function startFeatureFlagsSync() {
   unsubscribeFeatureFlags = subscribeToFeatureFlags((flags) => {
     featureFlags = { ...featureFlags, ...flags };
     applyRoleVisibility();
-    if (!document.getElementById("admin-settings-section").hidden) renderAdminFeatureFlags();
+    refreshAdminDashboardIfOpen();
   });
 }
 
@@ -273,160 +274,332 @@ function applyRoleVisibility() {
   accountBadge.classList.toggle("role-beta", role !== "admin");
 }
 
-// Admin-only panel: lets an admin change any registered user's role directly
-// from the app instead of editing Firestore documents by hand.
-let adminUsersCache = [];
+// ---------- toast ----------
 
-async function renderAdminUserList() {
-  const list = document.getElementById("admin-user-list");
-  list.innerHTML = `<li class="list-empty">Loading…</li>`;
-  try {
-    adminUsersCache = await fetchAllUsers();
-    renderFilteredAdminUserList();
-  } catch (err) {
-    console.error("failed to load users:", err);
-    list.innerHTML = `<li class="list-empty">Couldn't load users</li>`;
+const toastEl = document.getElementById("toast");
+let toastHideTimer = null;
+
+function showToast(message, isError = false) {
+  clearTimeout(toastHideTimer);
+  toastEl.textContent = message;
+  toastEl.classList.toggle("toast-error", isError);
+  toastEl.classList.add("show");
+  toastHideTimer = setTimeout(() => toastEl.classList.remove("show"), 2600);
+}
+
+// ---------- admin dashboard ----------
+// A dedicated modal (reusing the same shared modal shell as everything else in the
+// app) rather than an inline Settings section — keeps admin-only logic and its DOM
+// fully separate from the regular Settings screen, and out of a non-admin's way.
+
+let adminUsersCache = [];
+let adminDashboardActiveTab = null; // tracks which tab is open so a live feature-flag
+                                     // update from another admin session can re-render it
+let adminDashboardContentArea = null;
+
+// Called from startFeatureFlagsSync whenever the flags doc changes on the server — if
+// this admin currently has the Feature Flags tab open, redraw it with the fresh data
+// (e.g. another admin toggling something in a second tab/device shows up live here too).
+function refreshAdminDashboardIfOpen() {
+  if (adminDashboardActiveTab === "flags" && adminDashboardContentArea) {
+    adminDashboardContentArea.innerHTML = "";
+    renderFeatureFlagsTab(adminDashboardContentArea);
   }
 }
 
-// Re-filters the already-fetched user list against the search box and the
-// "show inactive" toggle — no network round-trip, so it can run on every
-// keystroke.
-function renderFilteredAdminUserList() {
-  const list = document.getElementById("admin-user-list");
-  const searchTerm = document.getElementById("admin-user-search").value.trim().toLowerCase();
-  const showInactive = document.getElementById("admin-show-inactive-toggle").checked;
+function openAdminDashboardModal(initialTab = "users") {
+  // Defense in depth: the launch button is already hidden for non-admins, but this
+  // guards the entry point itself too, in case it's ever called from anywhere else.
+  if ((state.settings.role || "user") !== "admin") return;
 
-  if (!adminUsersCache.length) {
-    list.innerHTML = `<li class="list-empty">No users found</li>`;
-    return;
+  openModal("🛡️ Admin Dashboard");
+
+  const tabBar = document.createElement("div");
+  tabBar.className = "segmented-control";
+  const usersTabBtn = document.createElement("button");
+  usersTabBtn.type = "button";
+  usersTabBtn.className = "segmented-option";
+  usersTabBtn.textContent = "👥 Users";
+  const flagsTabBtn = document.createElement("button");
+  flagsTabBtn.type = "button";
+  flagsTabBtn.className = "segmented-option";
+  flagsTabBtn.textContent = "🚩 Feature Flags";
+  tabBar.append(usersTabBtn, flagsTabBtn);
+
+  const contentArea = document.createElement("div");
+  modalBody.append(tabBar, contentArea);
+
+  adminDashboardContentArea = contentArea;
+
+  function showTab(tab) {
+    adminDashboardActiveTab = tab;
+    usersTabBtn.classList.toggle("active", tab === "users");
+    flagsTabBtn.classList.toggle("active", tab === "flags");
+    contentArea.innerHTML = "";
+    if (tab === "users") renderAdminUsersTab(contentArea);
+    else renderFeatureFlagsTab(contentArea);
   }
 
-  const filtered = adminUsersCache.filter((u) => {
-    const active = u.settings?.active !== false;
-    if (!active && !showInactive) return false;
-    if (!searchTerm) return true;
-    const name = `${u.settings?.firstName || ""} ${u.settings?.lastName || ""}`.trim().toLowerCase();
-    const email = (u.settings?.email || "").toLowerCase();
-    const role = (u.settings?.role || "user").toLowerCase();
-    return name.includes(searchTerm) || email.includes(searchTerm) || role.includes(searchTerm);
+  usersTabBtn.addEventListener("click", () => showTab("users"));
+  flagsTabBtn.addEventListener("click", () => showTab("flags"));
+  showTab(initialTab);
+
+  const closeBtn = document.createElement("button");
+  closeBtn.className = "btn-primary";
+  closeBtn.textContent = "Close";
+  closeBtn.addEventListener("click", closeModal);
+
+  const inviteBtn = document.createElement("button");
+  inviteBtn.className = "btn-plain";
+  inviteBtn.textContent = "🔗 Invite friends";
+  inviteBtn.addEventListener("click", () => {
+    closeModal();
+    openInviteModal();
   });
 
-  list.innerHTML = "";
-  if (!filtered.length) {
-    list.innerHTML = `<li class="list-empty">No users match your search</li>`;
-    return;
+  modalActions.append(closeBtn, inviteBtn);
+}
+
+// 👥 User Management tab: real-time search, active/inactive filter, and per-user
+// quick actions (reset password, block/unblock, role change).
+function renderAdminUsersTab(container) {
+  const searchInput = document.createElement("input");
+  searchInput.className = "field-input";
+  searchInput.type = "text";
+  searchInput.placeholder = "Search by name, email, or role…";
+
+  const inactiveRow = document.createElement("div");
+  inactiveRow.className = "switch-row";
+  const inactiveLabel = document.createElement("span");
+  inactiveLabel.textContent = "Show inactive/blocked users";
+  const inactiveToggleLabel = document.createElement("label");
+  inactiveToggleLabel.className = "toggle-switch";
+  const inactiveToggle = document.createElement("input");
+  inactiveToggle.type = "checkbox";
+  const inactiveSlider = document.createElement("span");
+  inactiveSlider.className = "toggle-slider";
+  inactiveToggleLabel.append(inactiveToggle, inactiveSlider);
+  inactiveRow.append(inactiveLabel, inactiveToggleLabel);
+
+  const list = document.createElement("ul");
+  list.className = "list";
+
+  container.append(searchInput, inactiveRow, list);
+
+  function renderFiltered() {
+    const searchTerm = searchInput.value.trim().toLowerCase();
+    const showInactive = inactiveToggle.checked;
+
+    if (!adminUsersCache.length) {
+      list.innerHTML = `<li class="list-empty">No users found</li>`;
+      return;
+    }
+
+    const filtered = adminUsersCache.filter((u) => {
+      const active = u.settings?.active !== false;
+      if (!active && !showInactive) return false;
+      if (!searchTerm) return true;
+      const name = `${u.settings?.firstName || ""} ${u.settings?.lastName || ""}`.trim().toLowerCase();
+      const email = (u.settings?.email || "").toLowerCase();
+      const role = (u.settings?.role || "user").toLowerCase();
+      return name.includes(searchTerm) || email.includes(searchTerm) || role.includes(searchTerm);
+    });
+
+    list.innerHTML = "";
+    if (!filtered.length) {
+      list.innerHTML = `<li class="list-empty">No users match your search</li>`;
+      return;
+    }
+
+    for (const u of filtered) {
+      const name = `${u.settings?.firstName || ""} ${u.settings?.lastName || ""}`.trim() || u.uid;
+      const email = u.settings?.email || "";
+      const role = u.settings?.role || "user";
+      const active = u.settings?.active !== false;
+      const isSelf = u.uid === currentUid;
+
+      const li = document.createElement("li");
+      li.className = "admin-user-card";
+
+      const nameP = document.createElement("p");
+      nameP.className = "admin-user-name";
+      nameP.textContent = active ? name : `${name} (blocked)`;
+      li.appendChild(nameP);
+
+      if (email) {
+        const emailP = document.createElement("p");
+        emailP.className = "admin-user-email";
+        emailP.textContent = email;
+        li.appendChild(emailP);
+      }
+
+      const actions = document.createElement("div");
+      actions.className = "admin-user-actions";
+
+      const select = document.createElement("select");
+      select.className = "admin-role-select";
+      select.innerHTML = `<option value="user">user</option><option value="beta">beta</option><option value="admin">admin</option>`;
+      select.value = role;
+      if (isSelf) {
+        // Never let an admin change their OWN role from here — same unrecoverable
+        // self-lockout risk as deactivating themselves (see the block-button guard
+        // below), just via a different field. With no other admin around, demoting
+        // yourself here would require editing Firestore by hand to undo.
+        select.disabled = true;
+      } else {
+        select.addEventListener("change", async () => {
+          select.disabled = true;
+          try {
+            await updateUserRole(u.uid, select.value);
+            u.settings.role = select.value; // keep the cache in sync so search/filter stays correct
+            showToast(`${name}'s role changed to ${select.value}`);
+          } catch (err) {
+            console.error("role update failed:", err);
+            select.value = role;
+            showToast("Couldn't update role", true);
+          } finally {
+            select.disabled = false;
+          }
+        });
+      }
+      actions.appendChild(select);
+
+      const resetBtn = document.createElement("button");
+      resetBtn.type = "button";
+      resetBtn.className = "admin-chip-btn";
+      resetBtn.textContent = "🔑 Reset password";
+      resetBtn.disabled = !email;
+      resetBtn.title = email ? "" : "No email on file for this account";
+      resetBtn.addEventListener("click", async () => {
+        resetBtn.disabled = true;
+        try {
+          await sendResetPasswordEmail(email);
+          showToast(`Reset email sent to ${email}`);
+        } catch (err) {
+          console.error("password reset failed:", err);
+          showToast("Couldn't send reset email", true);
+        } finally {
+          resetBtn.disabled = false;
+        }
+      });
+      actions.appendChild(resetBtn);
+
+      if (isSelf) {
+        // Never let an admin block/deactivate their own account from here — with
+        // no other admin around, that's an unrecoverable self-lockout (the only
+        // fix would be editing Firestore by hand).
+        const youTag = document.createElement("span");
+        youTag.className = "field-hint";
+        youTag.textContent = "(you)";
+        actions.appendChild(youTag);
+      } else {
+        const blockBtn = document.createElement("button");
+        blockBtn.type = "button";
+        blockBtn.className = active ? "admin-chip-btn danger" : "admin-chip-btn";
+        blockBtn.textContent = active ? "🚫 Block" : "✅ Unblock";
+        blockBtn.addEventListener("click", async () => {
+          blockBtn.disabled = true;
+          try {
+            await setUserActive(u.uid, !active);
+            u.settings.active = !active; // keep the cache in sync, no need to re-fetch everyone
+            showToast(active ? `${name} blocked` : `${name} unblocked`);
+            renderFiltered();
+          } catch (err) {
+            console.error("active toggle failed:", err);
+            showToast("Couldn't update user", true);
+            blockBtn.disabled = false;
+          }
+        });
+        actions.appendChild(blockBtn);
+      }
+
+      li.appendChild(actions);
+      list.appendChild(li);
+    }
   }
 
-  for (const u of filtered) {
-    const name = `${u.settings?.firstName || ""} ${u.settings?.lastName || ""}`.trim() || u.uid;
-    const role = u.settings?.role || "user";
-    const active = u.settings?.active !== false;
+  async function loadAdminUsers() {
+    list.innerHTML = `<li class="list-empty">Loading…</li>`;
+    try {
+      adminUsersCache = await fetchAllUsers();
+    } catch (err) {
+      console.error("failed to load users:", err);
+      list.innerHTML = `<li class="list-empty">Couldn't load users</li>`;
+      throw err;
+    }
+  }
 
+  searchInput.addEventListener("input", renderFiltered);
+  inactiveToggle.addEventListener("change", renderFiltered);
+
+  loadAdminUsers()
+    .then(renderFiltered)
+    .catch(() => {});
+}
+
+// 🚩 Feature Flags tab: each feature gets one rollout-level selector instead of three
+// separate toggles — Off / Admin Only / Beta Users / All Users. A "beta" or wider level
+// always implies admin can see it too (see canSeeFeature), so the level fully captures
+// the {user, beta, admin} shape without the admin having to manage the underlying flags
+// directly.
+function flagsToLevel(flags) {
+  if (flags?.user) return "all";
+  if (flags?.beta) return "beta";
+  if (flags?.admin) return "adminOnly";
+  return "off";
+}
+
+function levelToFlags(level) {
+  switch (level) {
+    case "all": return { user: true, beta: true, admin: true };
+    case "beta": return { user: false, beta: true, admin: true };
+    case "adminOnly": return { user: false, beta: false, admin: true };
+    default: return { user: false, beta: false, admin: false };
+  }
+}
+
+function renderFeatureFlagsTab(container) {
+  const list = document.createElement("ul");
+  list.className = "list";
+  container.appendChild(list);
+
+  for (const [key, label] of Object.entries(KNOWN_FEATURES)) {
     const li = document.createElement("li");
     li.className = "list-item";
 
-    const nameP = document.createElement("p");
-    nameP.className = "list-item-title";
-    nameP.textContent = active ? name : `${name} (inactive)`;
+    const row = document.createElement("div");
+    row.className = "admin-flag-row";
+
+    const titleP = document.createElement("p");
+    titleP.className = "list-item-title";
+    titleP.style.margin = "0";
+    titleP.textContent = label;
 
     const select = document.createElement("select");
-    select.className = "field-input";
-    select.innerHTML = `<option value="user">user</option><option value="beta">beta</option><option value="admin">admin</option>`;
-    select.value = role;
+    select.className = "admin-role-select";
+    select.innerHTML = `
+      <option value="off">Off</option>
+      <option value="adminOnly">Admin Only</option>
+      <option value="beta">Beta Users</option>
+      <option value="all">All Users</option>
+    `;
+    select.value = flagsToLevel(featureFlags[key]);
     select.addEventListener("change", async () => {
+      const previousLevel = flagsToLevel(featureFlags[key]);
       select.disabled = true;
       try {
-        await updateUserRole(u.uid, select.value);
+        await setFeatureFlagLevel(key, levelToFlags(select.value));
+        showToast(`${label} set to "${select.options[select.selectedIndex].textContent}"`);
       } catch (err) {
-        console.error("role update failed:", err);
-        select.value = role;
+        console.error("feature flag update failed:", err);
+        select.value = previousLevel;
+        showToast("Couldn't update feature flag", true);
       } finally {
         select.disabled = false;
       }
     });
 
-    if (u.uid === currentUid) {
-      // Never let an admin deactivate their own account from here — with
-      // no other admin around, that's an unrecoverable self-lockout
-      // (the only fix would be editing Firestore by hand).
-      const youTag = document.createElement("span");
-      youTag.className = "field-hint";
-      youTag.textContent = "(you)";
-      li.append(nameP, select, youTag);
-      list.appendChild(li);
-      continue;
-    }
-
-    const activeBtn = document.createElement("button");
-    activeBtn.className = active ? "danger-link" : "secondary-button";
-    activeBtn.type = "button";
-    activeBtn.textContent = active ? "Deactivate" : "Reactivate";
-    activeBtn.addEventListener("click", async () => {
-      activeBtn.disabled = true;
-      try {
-        await setUserActive(u.uid, !active);
-        renderAdminUserList();
-      } catch (err) {
-        console.error("active toggle failed:", err);
-        activeBtn.disabled = false;
-      }
-    });
-
-    li.append(nameP, select, activeBtn);
-    list.appendChild(li);
-  }
-}
-
-document.getElementById("admin-user-search").addEventListener("input", renderFilteredAdminUserList);
-document.getElementById("admin-show-inactive-toggle").addEventListener("change", renderFilteredAdminUserList);
-
-// Admin-only panel: toggles which role tiers can currently see each
-// experimental feature. Starting point for any future feature — new ones
-// should register themselves in KNOWN_FEATURES and default to off for
-// everyone until an admin explicitly turns them on for a role.
-function renderAdminFeatureFlags() {
-  const list = document.getElementById("admin-feature-flags-list");
-  list.innerHTML = "";
-  for (const [key, label] of Object.entries(KNOWN_FEATURES)) {
-    const li = document.createElement("li");
-    li.className = "list-item";
-
-    const titleP = document.createElement("p");
-    titleP.className = "list-item-title";
-    titleP.textContent = label;
-    li.appendChild(titleP);
-
-    const row = document.createElement("div");
-    row.className = "list-item-row";
-    for (const role of ["user", "beta", "admin"]) {
-      const wrap = document.createElement("label");
-      wrap.className = "switch-row";
-      wrap.style.cssText = "gap:4px;";
-      const span = document.createElement("span");
-      span.textContent = role;
-      const toggleLabel = document.createElement("label");
-      toggleLabel.className = "toggle-switch";
-      const input = document.createElement("input");
-      input.type = "checkbox";
-      input.checked = !!featureFlags[key]?.[role];
-      input.addEventListener("change", async () => {
-        input.disabled = true;
-        try {
-          await updateFeatureFlag(key, role, input.checked);
-        } catch (err) {
-          console.error("feature flag update failed:", err);
-          input.checked = !input.checked;
-        } finally {
-          input.disabled = false;
-        }
-      });
-      const slider = document.createElement("span");
-      slider.className = "toggle-slider";
-      toggleLabel.append(input, slider);
-      wrap.append(span, toggleLabel);
-      row.appendChild(wrap);
-    }
+    row.append(titleP, select);
     li.appendChild(row);
     list.appendChild(li);
   }
@@ -669,6 +842,10 @@ function closeModal() {
   modalBackdrop.hidden = true;
   modalBody.innerHTML = "";
   modalActions.innerHTML = "";
+  // Whatever modal was open, it's gone now — stop tracking it for live refreshes
+  // (harmless no-op if the Admin Dashboard wasn't the one open).
+  adminDashboardActiveTab = null;
+  adminDashboardContentArea = null;
 }
 
 function openModal(title) {
@@ -1921,7 +2098,6 @@ function openInviteModal() {
 }
 
 document.getElementById("btn-invite-friends").addEventListener("click", openInviteModal);
-document.getElementById("btn-admin-invite").addEventListener("click", openInviteModal);
 
 // ---------- render: settings ----------
 
@@ -1958,11 +2134,7 @@ function renderSettings() {
   document.getElementById("signed-in-as").textContent = currentUid ? `Signed in as: ${currentUserLabel}` : "";
 
   const isAdmin = (state.settings.role || "user") === "admin";
-  document.getElementById("admin-settings-section").hidden = !isAdmin;
-  if (isAdmin) {
-    renderAdminUserList();
-    renderAdminFeatureFlags();
-  }
+  document.getElementById("btn-open-admin-dashboard").hidden = !isAdmin;
 
   document.getElementById("settings-employment-start-date").value = state.settings.employmentStartDate || "";
 
@@ -2080,6 +2252,8 @@ document.getElementById("btn-save-all-settings").addEventListener("click", () =>
 document.getElementById("btn-logout").addEventListener("click", handleLogout);
 
 document.getElementById("btn-delete-account").addEventListener("click", openDeleteAccountModal);
+
+document.getElementById("btn-open-admin-dashboard").addEventListener("click", () => openAdminDashboardModal());
 
 function openDeleteAccountModal() {
   openModal("Delete your account?");

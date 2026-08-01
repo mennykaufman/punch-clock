@@ -291,30 +291,8 @@
       </div>
     </details>
 
-    <!-- Admin Settings (admins only) -->
-    <details class="card settings-section" id="admin-settings-section" hidden>
-      <summary class="settings-section-header"><span>Admin Settings</span><span class="chevron">▾</span></summary>
-      <div class="settings-section-body">
-
-      <p class="field-label">User Management</p>
-      <p class="field-hint">Change a user's role, or deactivate someone who left.</p>
-      <input class="field-input" type="text" id="admin-user-search" placeholder="Search by name, email, or role…" />
-      <div class="switch-row">
-        <span>Show inactive/blocked users</span>
-        <label class="toggle-switch">
-          <input type="checkbox" id="admin-show-inactive-toggle" />
-          <span class="toggle-slider"></span>
-        </label>
-      </div>
-      <ul class="list" id="admin-user-list"></ul>
-
-      <p class="field-label" style="margin-top:16px;">Feature Flags</p>
-      <p class="field-hint">Which roles can currently see each experimental feature.</p>
-      <ul class="list" id="admin-feature-flags-list"></ul>
-
-      <button class="secondary-button" id="btn-admin-invite" type="button" style="margin-top:16px;">Invite friends (QR / link)</button>
-      </div>
-    </details>
+    <!-- Admin Dashboard entry point (admins only) -->
+    <button class="secondary-button" id="btn-open-admin-dashboard" type="button" hidden>🛡️ Admin Dashboard</button>
 
     <div class="settings-save-bar" id="settings-save-bar" hidden>
       <p class="field-hint" id="settings-saved-hint"></p>
@@ -352,6 +330,8 @@
 </div>
 
 <!-- Shift disambiguation / confirmation modal -->
+<div id="toast" role="status" aria-live="polite"></div>
+
 <div class="modal-backdrop" id="modal-backdrop" hidden>
   <div class="modal" id="modal">
     <h2 id="modal-title">Title</h2>

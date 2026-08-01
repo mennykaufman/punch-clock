@@ -19,6 +19,7 @@ import {
   onAuthStateChanged,
   signOut,
   deleteUser,
+  sendPasswordResetEmail,
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
 import { getAnalytics, logEvent, isSupported as isAnalyticsSupported } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-analytics.js";
 
@@ -174,9 +175,20 @@ export function subscribeToFeatureFlags(onData) {
   return onSnapshot(featureFlagsRef(), (snap) => onData(snap.exists() ? snap.data() : {}));
 }
 
-// Admin-only: enables/disables one feature for one role tier. A dotted field
-// path update (not setDoc) so multiple admins editing different flags/roles
-// in parallel can never clobber each other's changes.
-export async function updateFeatureFlag(featureKey, role, enabled) {
-  await setDoc(featureFlagsRef(), { [featureKey]: { [role]: enabled } }, { merge: true });
+// Admin-only: sets all three role tiers for one feature in a single atomic write (used
+// by the Admin Dashboard's single rollout-level selector). merge:true only touches this
+// featureKey's own sub-fields, so admins editing different features concurrently can
+// never clobber each other, and one write instead of three avoids an inconsistent
+// partial update landing if a per-role write failed mid-flight.
+export async function setFeatureFlagLevel(featureKey, flags) {
+  await setDoc(featureFlagsRef(), { [featureKey]: flags }, { merge: true });
+}
+
+// Admin-only: sends Firebase Auth's standard password-reset email to the given address.
+// Note: every account in this app signs in via Google (see signInWithGoogle) — there is
+// no email/password credential to reset, so for a real Google-only account this call
+// resolves without throwing but has no functional effect for that user. Kept available
+// for admin-dashboard completeness / in case email+password sign-in is ever added.
+export async function sendResetPasswordEmail(email) {
+  await sendPasswordResetEmail(auth, email);
 }

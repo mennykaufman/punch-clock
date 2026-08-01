@@ -1228,3 +1228,96 @@ body {
 }
 
 .woc-coming-soon[hidden] { display: none; }
+
+/* ---------- toast ---------- */
+
+#toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(24px + env(safe-area-inset-bottom));
+  transform: translateX(-50%) translateY(20px);
+  background: var(--text-primary);
+  color: var(--card-bg);
+  padding: 12px 20px;
+  border-radius: 12px;
+  font-size: 14px;
+  font-weight: 600;
+  max-width: 90vw;
+  text-align: center;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
+  z-index: 500;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s ease, transform 0.25s ease;
+}
+
+#toast.show {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+#toast.toast-error {
+  background: var(--danger);
+  color: #fff;
+}
+
+/* ---------- admin dashboard ---------- */
+
+.admin-user-card {
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 12px;
+  padding: 12px 14px;
+  margin-bottom: 10px;
+}
+
+.admin-user-name {
+  font-weight: 600;
+  font-size: 15px;
+  margin: 0 0 2px;
+}
+
+.admin-user-email {
+  color: var(--text-secondary);
+  font-size: 13px;
+  margin: 0 0 10px;
+}
+
+.admin-user-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.admin-role-select {
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--card-border);
+  background: var(--bg-main);
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.admin-role-select:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.admin-chip-btn {
+  padding: 7px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--card-border);
+  background: var(--bg-main);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.admin-chip-btn.danger { color: var(--danger); border-color: var(--danger); }
+.admin-chip-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.admin-flag-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
