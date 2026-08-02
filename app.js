@@ -2543,6 +2543,25 @@ function formatTimeInputValue(date) {
   return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
+// inputMode="numeric" gives mobile users a digits-only keypad with no ":" key, so without
+// this they can never actually type a string matching TIME_24H_RE — the field silently
+// can't be filled in correctly and every save fails validation. Auto-inserting the colon
+// after the 2nd digit (and stripping any non-digits first, so a pasted "12:34" still works)
+// means the user only ever has to type digits.
+function attachTimeInputMask(input) {
+  input.addEventListener("input", () => {
+    // Preserve cursor position across the rewrite below (by distance from the end,
+    // not absolute index) — otherwise editing a digit in the middle of an existing
+    // time (not just typing a fresh one left-to-right) knocks the cursor to the end
+    // after every keystroke.
+    const cursorFromEnd = input.value.length - input.selectionStart;
+    const digits = input.value.replace(/\D/g, "").slice(0, 4);
+    input.value = digits.length > 2 ? `${digits.slice(0, 2)}:${digits.slice(2)}` : digits;
+    const pos = Math.max(0, input.value.length - cursorFromEnd);
+    input.setSelectionRange(pos, pos);
+  });
+}
+
 // Builds a labeled [date input, 24h time-text input] pair, pre-filled from initialDate
 // if given. Returns the pieces the caller needs to append to the modal and to read back.
 function createDateTimeFields(labelText, initialDate) {
@@ -2560,6 +2579,7 @@ function createDateTimeFields(labelText, initialDate) {
   timeInput.placeholder = "HH:MM (24h)";
   timeInput.inputMode = "numeric";
   timeInput.maxLength = 5;
+  attachTimeInputMask(timeInput);
 
   if (initialDate) {
     dateInput.value = formatDateInputValue(initialDate);
@@ -3100,6 +3120,7 @@ function renderShiftSimulatorTab(container) {
   startInput.inputMode = "numeric";
   startInput.maxLength = 5;
   startInput.value = "12:00";
+  attachTimeInputMask(startInput);
 
   const endLabel = document.createElement("label");
   endLabel.className = "field-label";
@@ -3111,6 +3132,7 @@ function renderShiftSimulatorTab(container) {
   endInput.inputMode = "numeric";
   endInput.maxLength = 5;
   endInput.value = "20:00";
+  attachTimeInputMask(endInput);
 
   const resultBox = document.createElement("div");
 

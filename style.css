@@ -440,6 +440,7 @@ body {
 
 .luba-avatar-wrap {
   margin-top: 76px;
+  margin-bottom: 20px;
 }
 
 .big-button {
@@ -524,6 +525,12 @@ body {
   color: var(--text-primary);
   cursor: pointer;
   margin-bottom: 14px;
+}
+
+/* .big-button has no margin of its own, so without this it sits flush against
+   #btn-update-schedule right above it. */
+#btn-invite-friends {
+  margin-top: 14px;
 }
 
 .danger-link {
