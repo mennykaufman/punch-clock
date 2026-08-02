@@ -30,9 +30,7 @@ const firebaseConfig = {
   storageBucket: "mennys-punch-clock.firebasestorage.app",
   messagingSenderId: "817102912808",
   appId: "1:817102912808:web:484958adc478241fa3241d",
-  // Fill this in from Firebase Console > Project Settings > General > Your apps,
-  // after linking Google Analytics to the project (see setup instructions).
-  measurementId: "",
+  measurementId: "G-14600DJCP6",
 };
 
 const app = initializeApp(firebaseConfig);

@@ -884,13 +884,16 @@ modalBackdrop.addEventListener("click", (e) => {
 
 // Bumped whenever the legal text below changes materially — drives the blocking
 // re-consent banner for existing accounts (see maybeShowTermsReconsentBanner).
-const TERMS_VERSION = "2026-08-01";
+const TERMS_VERSION = "2026-08-02";
 
-function openTermsModal(onClosed) {
+// scrollToId: optional element id inside the terms body to scroll to right after opening —
+// used by entry points specifically labeled "Privacy Policy" (not "Terms of Service"), so
+// clicking them actually lands on that section instead of the top of the combined document.
+function openTermsModal(onClosed, scrollToId) {
   openModal("תנאי שימוש ומדיניות פרטיות");
   modalBody.innerHTML = `
     <div dir="rtl" style="text-align: right;">
-      <p class="field-hint">עדכון אחרון: 01.08.2026</p>
+      <p class="field-hint">עדכון אחרון: 02.08.2026</p>
 
       <h2 style="font-size: 18px; margin: 12px 0 4px;">חלק א' – תנאי שימוש</h2>
 
@@ -961,7 +964,7 @@ function openTermsModal(onClosed) {
       <p><strong>15. יצירת קשר</strong><br/>
       לכל שאלה, פנייה או תלונה בנוגע לתנאים אלה, ניתן לפנות למני קאופמן (חוליה מיוחדת).</p>
 
-      <h2 style="font-size: 18px; margin: 20px 0 4px;">חלק ב' – מדיניות פרטיות</h2>
+      <h2 id="privacy-policy-heading" style="font-size: 18px; margin: 20px 0 4px;">חלק ב' – מדיניות פרטיות</h2>
 
       <p><strong>1. המידע שאנו אוספים</strong><br/>
       לצורך תפעול השירות, אנו אוספים את סוגי המידע הבאים:</p>
@@ -982,7 +985,7 @@ function openTermsModal(onClosed) {
       השירות משתמש בספקים ובשירותים הבאים לצורך תפעולו:</p>
       <p>Google Firebase Authentication – ניהול תהליך ההתחברות.<br/>
       Google Firebase Firestore – אחסון נתוני המשתמש בענן.<br/>
-      Google Firebase Analytics – מוגדר בתשתית האפליקציה לצורך ניתוח שימוש עתידי; נכון למועד עדכון מסמך זה אינו פעיל בפועל. במידה ויופעל בעתיד, מדיניות זו תעודכן בהתאם ותכלול פירוט אירועי המידע הנאספים ואפשרות סירוב (Opt-Out).<br/>
+      Google Firebase Analytics – פעיל, ומשמש לאיסוף נתוני שימוש אנונימיים ומצטברים (לא מזוהים אישית מעבר למזהה משתמש פנימי) לצורך שיפור השירות. הנתונים הנאספים כוללים: הרשמה/התחברות, צפיות במסכי האפליקציה השונים (לצורך הבנת אילו פיצ'רים בשימוש), פעולות שעון נוכחות (כניסה/יציאה ממשמרת), רישום נקודות לובה, שיתוף לוח משמרות, וייצוא נתונים. המשך השימוש באפליקציה לאחר קבלת עדכון תנאים אלה מהווה הסכמה לאיסוף הנתונים כאמור; משתמש שאינו מסכים לכך יכול לבחור שלא לאשר את התנאים המעודכנים, ובמקרה זה לא יוכל להמשיך ולהשתמש באפליקציה.<br/>
       ספריות ייצוא קבצים (Excel/PDF) – פועלות באופן מקומי בדפדפן/במכשיר שלך בלבד, ואינן משדרות מידע לשרת חיצוני כלשהו.</p>
       <p>לא נעשה שימוש בשירותי פרסום, מעקב שיווקי, או שיתוף מידע עם רשתות חברתיות.</p>
 
@@ -1022,6 +1025,10 @@ function openTermsModal(onClosed) {
     if (onClosed) onClosed();
   });
   modalActions.appendChild(closeBtn);
+
+  if (scrollToId) {
+    document.getElementById(scrollToId)?.scrollIntoView();
+  }
 }
 
 // Existing accounts only — a brand-new signup gets termsAcceptedVersion set to the
@@ -1034,24 +1041,24 @@ function maybeShowTermsReconsentBanner() {
 }
 
 function showTermsReconsentBanner() {
-  openModal("עודכנו תנאי השימוש שלנו");
+  openModal("עודכנה מדיניות הפרטיות");
   blockBackdropDismiss = true;
   modalBody.innerHTML = `
     <div dir="rtl" style="text-align: right;">
-      <p>עדכנו את תנאי השימוש ומדיניות הפרטיות של TrackO'clock. השינויים כוללים הבהרות לגבי אופן חישוב השכר, מנגנון נקודות הלובה ופיצ'ר "מי במשמרת". יש צורך באישור מחדש כדי להמשיך להשתמש באפליקציה.</p>
+      <p>עדכנו את מדיניות הפרטיות בעקבות הוספת כלי אנליטיקס אנונימי להבנת אופן השימוש באפליקציה. לפרטים המלאים ניתן לקרוא במדיניות הפרטיות.</p>
     </div>
   `;
 
   const readFullBtn = document.createElement("button");
   readFullBtn.className = "btn-plain";
-  readFullBtn.textContent = "קרא/י את התנאים המלאים";
+  readFullBtn.textContent = "מדיניות הפרטיות";
   readFullBtn.addEventListener("click", () => {
-    openTermsModal(() => showTermsReconsentBanner());
+    openTermsModal(() => showTermsReconsentBanner(), "privacy-policy-heading");
   });
 
   const agreeBtn = document.createElement("button");
   agreeBtn.className = "btn-primary";
-  agreeBtn.textContent = "קראתי ואני מאשר/ת";
+  agreeBtn.textContent = "מאשר/ת";
   agreeBtn.addEventListener("click", () => {
     state.settings.termsAcceptedVersion = TERMS_VERSION;
     state.settings.termsAcceptedAt = new Date().toISOString();
@@ -1084,7 +1091,7 @@ function maybeShowShareConsentScreen(onProceed) {
   privacyBtn.className = "btn-plain";
   privacyBtn.textContent = "מדיניות הפרטיות";
   privacyBtn.addEventListener("click", () => {
-    openTermsModal(() => maybeShowShareConsentScreen(onProceed));
+    openTermsModal(() => maybeShowShareConsentScreen(onProceed), "privacy-policy-heading");
   });
 
   const agreeBtn = document.createElement("button");
