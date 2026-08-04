@@ -1244,7 +1244,7 @@ clockBtn.addEventListener("pointerdown", () => {
   clockLongPressTimer = setTimeout(() => {
     clockLongPressFired = true;
     clockLongPressTimer = null;
-    openManualEntryModal();
+    openRetroactiveClockModal();
   }, CLOCK_LONG_PRESS_MS);
 });
 clockBtn.addEventListener("pointerup", cancelClockLongPress);
@@ -1269,8 +1269,48 @@ clockBtn.addEventListener("click", async (e) => {
   }
 });
 
-async function handleClockIn() {
-  const clockInDate = new Date();
+// Long-press shortcut for "I forgot to punch in/out at the actual time and only remembered
+// later" — asks for exactly ONE timestamp (whichever side is actually missing right now),
+// not a whole separate shift like the FAB's full manual-entry form. Reuses the real
+// handleClockIn/handleClockOut so every existing rule (shift resolution, shift-type prompt,
+// the "too soon" guard, pay/points calculation) applies exactly the same as a real tap.
+function openRetroactiveClockModal() {
+  const isClockingOut = !!state.currentPunch;
+  openModal(isClockingOut ? "What time did you actually clock out?" : "What time did you actually clock in?");
+
+  const fields = createDateTimeFields(isClockingOut ? "Clock out" : "Clock in", new Date());
+  const errorP = document.createElement("p");
+  errorP.className = "field-hint";
+  modalBody.append(fields.label, fields.dateInput, fields.timeInput, errorP);
+
+  const saveBtn = document.createElement("button");
+  saveBtn.className = "btn-primary";
+  saveBtn.textContent = "Continue";
+  saveBtn.addEventListener("click", async () => {
+    const enteredDate = parseDateTimeFields(fields.dateInput, fields.timeInput);
+    if (!enteredDate) {
+      errorP.textContent = "Enter a valid date and time (HH:MM).";
+      return;
+    }
+    closeModal();
+    if (isClockingOut) {
+      await handleClockOut(enteredDate);
+    } else {
+      await handleClockIn(enteredDate);
+    }
+  });
+
+  const cancelBtn = document.createElement("button");
+  cancelBtn.className = "btn-plain";
+  cancelBtn.textContent = "Cancel";
+  cancelBtn.addEventListener("click", closeModal);
+
+  modalActions.append(cancelBtn, saveBtn);
+}
+
+// clockInDate defaults to right now (the normal "tap the button" path) — overridable so the
+// Clock button's long-press retroactive-entry shortcut can supply a past time instead.
+async function handleClockIn(clockInDate = new Date()) {
   const shift = await resolveShiftForClockIn(clockInDate);
   if (!shift) return;
   let shiftType = "";
@@ -1446,8 +1486,8 @@ function buildPunch(clockInDate, clockOutDate, shift, pickedShift, shiftType = "
   return { punch, pay, pointsDelta };
 }
 
-async function handleClockOut() {
-  const clockOutDate = new Date();
+// clockOutDate defaults to right now, same override rationale as handleClockIn above.
+async function handleClockOut(clockOutDate = new Date()) {
   const clockInDate = new Date(state.currentPunch.clockInISO);
   const pickedShift = state.currentPunch.shift;
 
