@@ -38,6 +38,7 @@ function defaultState(employmentStartDate = "", idfBonusPercent = 0) {
       theme: "system", // "system" | "dark" | "light"
       monthlyHoursGoal: 0, // 0 = no goal set
       moreWidgets: { hours: true, shifts: true, pay: true, averages: true, luba: true, export: true },
+      showFloatingManualEntry: true, // shows/hides the Attendance screen's floating "add shift" button
       // New accounts sign up through the tos-checkbox-gated flow, so they've already
       // agreed to whatever's current at creation time — no re-consent banner for them.
       termsAcceptedVersion: TERMS_VERSION,
@@ -1115,7 +1116,7 @@ function shiftLabel(shift) {
 
 // ---------- optional shift type (station/role) tagging ----------
 
-const SHIFT_TYPES = ["דלפק", "באגי יציאות", "דייל קונקורס", "באגי כניסות", "פסיפס", `דייל של"ן`];
+const SHIFT_TYPES = ["דלפק", "באגי יציאות", "דייל קונקורס", "באגי כניסות", "פסיפס", `דייל של"ן`, "TR1"];
 
 // Resolves to a chosen shift type string, or "" if skipped/cleared.
 function promptShiftType(current = "") {
@@ -1222,7 +1223,45 @@ function resolveWithManualPicker(resolve) {
 const clockBtn = document.getElementById("btn-clock");
 const NO_POINTS_SHIFT_LABEL = "Shift without points eligibility";
 
-clockBtn.addEventListener("click", async () => {
+// Long-press (hold) on the main Clock In/Out button opens the manual-entry form instead —
+// for a punch the user forgot to make in real time and is now recording after the fact.
+// A single boolean flag (not a "was this a long-press" event property) is enough here since
+// pointerdown/pointerup only ever happen one pair at a time on this one button.
+const CLOCK_LONG_PRESS_MS = 800;
+let clockLongPressTimer = null;
+let clockLongPressFired = false;
+
+function cancelClockLongPress() {
+  if (clockLongPressTimer) {
+    clearTimeout(clockLongPressTimer);
+    clockLongPressTimer = null;
+  }
+}
+
+clockBtn.addEventListener("pointerdown", () => {
+  clockLongPressFired = false;
+  cancelClockLongPress();
+  clockLongPressTimer = setTimeout(() => {
+    clockLongPressFired = true;
+    clockLongPressTimer = null;
+    openManualEntryModal();
+  }, CLOCK_LONG_PRESS_MS);
+});
+clockBtn.addEventListener("pointerup", cancelClockLongPress);
+clockBtn.addEventListener("pointerleave", cancelClockLongPress);
+clockBtn.addEventListener("pointercancel", cancelClockLongPress);
+// Mobile long-press on a button can otherwise pop up the browser's text-selection/context
+// menu instead of (or on top of) the app's own long-press behavior.
+clockBtn.addEventListener("contextmenu", (e) => e.preventDefault());
+
+clockBtn.addEventListener("click", async (e) => {
+  // The long-press already handled this press (and opened its own modal) — the click
+  // event that fires on release right after would otherwise ALSO clock in/out for real.
+  if (clockLongPressFired) {
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    return;
+  }
   if (state.currentPunch) {
     await handleClockOut();
   } else {
@@ -1634,6 +1673,8 @@ document.getElementById("home-pay-card").addEventListener("click", () => {
 let historyViewedMonth = new Date();
 
 function renderHistory() {
+  document.getElementById("btn-fab-manual-entry").hidden = state.settings.showFloatingManualEntry === false;
+
   const isCurrentMonth = sameMonth(historyViewedMonth, new Date());
   document.getElementById("history-month-label").textContent =
     historyViewedMonth.toLocaleDateString([], { year: "numeric", month: "long" });
@@ -2387,6 +2428,8 @@ function renderSettings() {
   for (const key of ["hours", "shifts", "pay", "averages", "luba", "export"]) {
     document.getElementById(`more-widget-${key}`).checked = widgets[key] !== false;
   }
+
+  document.getElementById("floating-manual-entry-toggle").checked = state.settings.showFloatingManualEntry !== false;
 }
 
 for (const key of ["hours", "shifts", "pay", "averages", "luba", "export"]) {
@@ -2452,6 +2495,12 @@ document.getElementById("remind-points-toggle").addEventListener("change", (e) =
 
 document.getElementById("track-shift-type-toggle").addEventListener("change", (e) => {
   state.settings.trackShiftType = e.target.checked;
+  renderHistory();
+  markSettingsDirty();
+});
+
+document.getElementById("floating-manual-entry-toggle").addEventListener("change", (e) => {
+  state.settings.showFloatingManualEntry = e.target.checked;
   renderHistory();
   markSettingsDirty();
 });
@@ -2771,6 +2820,7 @@ function openMoreModal() {
 }
 
 document.getElementById("btn-open-more").addEventListener("click", openMoreModal);
+document.getElementById("btn-fab-manual-entry").addEventListener("click", () => openManualEntryModal());
 
 function openManualEntryModal() {
   openModal("Add shift manually");

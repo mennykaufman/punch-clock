@@ -457,10 +457,26 @@ body {
   transition: all 0.3s ease;
 }
 
+/* #btn-clock specifically supports a hold-to-open-manual-entry gesture (see app.js) — on
+   iOS Safari, holding a button normally triggers the system's text-selection callout
+   (magnifying glass / "Copy" popup) before our own JS timer has a chance to react, since
+   contextmenu-prevention alone doesn't suppress it. This is the CSS half of that fix. */
+#btn-clock {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
 #screen-settings {
   /* Reserves room so scrolled-to content is never covered by the fixed
      save bar below (in addition to the bottom-nav clearance body already has). */
   padding-bottom: 84px;
+}
+
+#screen-history {
+  /* Same reasoning as #screen-settings above — without this, the last rows of a long
+     month's table scroll in behind the floating manual-entry button. */
+  padding-bottom: 96px;
 }
 
 .settings-save-bar {
@@ -475,6 +491,29 @@ body {
 }
 
 .settings-save-bar[hidden] { display: none; }
+
+/* Floating "add shift manually" button on the Attendance screen — sits above the bottom
+   nav (which is 64px tall) with a small gap, off to the side so it never covers the table. */
+.fab-manual-entry {
+  position: fixed;
+  right: 20px;
+  bottom: calc(64px + 20px + env(safe-area-inset-bottom));
+  width: 56px;
+  height: 56px;
+  border: none;
+  border-radius: 50%;
+  background: var(--btn-primary-bg);
+  color: var(--btn-primary-text);
+  box-shadow: var(--btn-shadow);
+  font-size: 28px;
+  line-height: 1;
+  cursor: pointer;
+  z-index: 20;
+  transition: transform 0.15s ease, background-color 0.3s ease;
+}
+
+.fab-manual-entry:active { transform: scale(0.92); }
+.fab-manual-entry[hidden] { display: none; }
 
 .settings-save-bar .field-hint {
   text-align: center;
